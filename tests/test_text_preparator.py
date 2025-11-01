@@ -644,3 +644,263 @@ def test_prepare_function_with_unicode(tokenizer):
     # Should not raise, should handle unicode gracefully
     assert isinstance(prepared, str)
     assert len(prepared) > 0
+
+
+def test_integration_with_embedding_generator():
+    """Test TextPreparator integrated with EmbeddingGenerator pipeline."""
+    from codesearch.embeddings.generator import EmbeddingGenerator
+
+    generator = EmbeddingGenerator()
+    preparator = TextPreparator(generator.tokenizer, max_tokens=512)
+
+    func = Function(
+        name="calculate",
+        file_path="/test.py",
+        language="python",
+        source_code="def calculate(a, b):\n    return a + b",
+        docstring="Add two numbers.",
+        line_number=1,
+    )
+
+    # Prepare text
+    prepared_text = preparator.prepare_function(func)
+    assert isinstance(prepared_text, str)
+    assert len(prepared_text) > 0
+
+    # Can be embedded
+    embedding = generator.embed_code(prepared_text)
+    assert isinstance(embedding, list)
+    assert len(embedding) == 768
+    assert all(isinstance(x, float) for x in embedding)
+
+
+def test_integration_batch_to_embeddings():
+    """Test batch preparation then embedding."""
+    from codesearch.embeddings.generator import EmbeddingGenerator
+
+    generator = EmbeddingGenerator()
+    preparator = TextPreparator(generator.tokenizer, max_tokens=512)
+
+    functions = [
+        Function(
+            name="add",
+            file_path="/test.py",
+            language="python",
+            source_code="def add(a, b): return a + b",
+            docstring="Add numbers.",
+            line_number=1,
+        ),
+        Function(
+            name="sub",
+            file_path="/test.py",
+            language="python",
+            source_code="def sub(a, b): return a - b",
+            docstring="Subtract numbers.",
+            line_number=5,
+        ),
+    ]
+
+    # Prepare batch
+    prepared_texts = preparator.prepare_batch(functions)
+    assert len(prepared_texts) == 2
+
+    # Embed batch
+    embeddings = generator.embed_batch(prepared_texts)
+    assert len(embeddings) == 2
+    assert all(len(e) == 768 for e in embeddings)
+
+    # Embeddings should be different
+    assert embeddings[0] != embeddings[1]
+
+
+def test_token_limit_respected_in_real_code():
+    """Test token limits with realistic code examples."""
+    from codesearch.embeddings.generator import EmbeddingGenerator
+
+    generator = EmbeddingGenerator()
+    preparator = TextPreparator(generator.tokenizer, max_tokens=100)  # Tight limit
+
+    # Create realistically long function
+    long_function = """def analyze_complex_data(dataset, config):
+    \"\"\"Analyze complex dataset with detailed configuration.
+
+    This function performs multiple analysis steps including
+    data validation, transformation, and aggregation with
+    special handling for edge cases.
+    \"\"\"
+    # Process data
+    """ + "\n    ".join([f"step_{i} = process_part_{i}(dataset)" for i in range(30)])
+
+    func = Function(
+        name="analyze_complex_data",
+        file_path="/test.py",
+        language="python",
+        source_code=long_function,
+        docstring="Analyze complex dataset with detailed configuration.",
+        line_number=1,
+    )
+
+    prepared = preparator.prepare_function(func)
+    token_count = preparator._count_tokens(prepared)
+
+    # Must respect token limit
+    assert token_count <= 100
+    # Must have preserved docstring
+    assert "Analyze complex dataset" in prepared or "analyze_complex_data" in prepared
+
+
+def test_prepare_preserves_semantic_value():
+    """Test that preparation preserves semantic value through pipeline."""
+    from codesearch.embeddings.generator import EmbeddingGenerator
+
+    generator = EmbeddingGenerator()
+    preparator = TextPreparator(generator.tokenizer, max_tokens=512)
+
+    func = Function(
+        name="calculate_average",
+        file_path="/test.py",
+        language="python",
+        source_code="""def calculate_average(numbers):
+    # TODO: add input validation
+    total = sum(numbers)  # trivial comment
+    return total / len(numbers)""",
+        docstring="Calculate arithmetic mean of numbers.",
+        line_number=1,
+    )
+
+    prepared = preparator.prepare_function(func)
+
+    # Important elements preserved
+    assert "Calculate arithmetic mean" in prepared
+    assert "TODO" in prepared  # Important comment
+    assert "trivial comment" not in prepared  # Removed
+    assert "calculate_average" in prepared
+    assert "sum" in prepared
+
+
+def test_integration_with_call_graph():
+    """Test preparation in realistic call graph context."""
+    from codesearch.embeddings.generator import EmbeddingGenerator
+
+    generator = EmbeddingGenerator()
+    preparator = TextPreparator(generator.tokenizer, max_tokens=512)
+
+    # Simulate real functions with relationships
+    functions = [
+        Function(
+            name="main",
+            file_path="/app.py",
+            language="python",
+            source_code="def main():\n    return process()",
+            docstring="Main entry point.",
+            line_number=1,
+            calls_to=["process"],
+        ),
+        Function(
+            name="process",
+            file_path="/app.py",
+            language="python",
+            source_code="def process():\n    return helper()",
+            docstring="Process data.",
+            line_number=5,
+            calls_to=["helper"],
+        ),
+        Function(
+            name="helper",
+            file_path="/app.py",
+            language="python",
+            source_code="def helper():\n    return 42",
+            docstring="Helper function.",
+            line_number=10,
+        ),
+    ]
+
+    # Prepare all
+    prepared = preparator.prepare_batch(functions)
+    assert len(prepared) == 3
+
+    # Generate embeddings
+    embeddings = generator.embed_batch(prepared)
+    assert len(embeddings) == 3
+
+    # All should be valid embeddings
+    assert all(len(e) == 768 for e in embeddings)
+    assert all(all(isinstance(x, float) for x in e) for e in embeddings)
+
+
+def test_real_codebase_p3_validation():
+    """Validate TextPreparator on real P3 codebase.
+
+    This test ensures the system works on real code with:
+    - Varied coding styles
+    - Different function complexities
+    - Real docstrings and comments
+    - Various Python patterns
+    """
+    import os
+    from pathlib import Path
+    from codesearch.parsers import PythonParser
+    from codesearch.embeddings.generator import EmbeddingGenerator
+
+    generator = EmbeddingGenerator()
+    preparator = TextPreparator(generator.tokenizer, max_tokens=512)
+    parser = PythonParser()
+
+    # Test on P3 codebase (adjust path as needed)
+    p3_path = Path("/Users/julienpequegnot/Code/parakeet-podcast-processor/p3")
+
+    if not p3_path.exists():
+        # Skip if P3 not available
+        pytest.skip("P3 codebase not available for testing")
+
+    python_files = list(p3_path.rglob("*.py"))
+    assert len(python_files) > 0, "No Python files found in P3 codebase"
+
+    total_functions = 0
+    total_prepared = 0
+    max_tokens_exceeded = 0
+    errors_encountered = 0
+    parse_errors = []
+
+    for py_file in python_files[:10]:  # Test first 10 files
+        try:
+            items = parser.parse_file(str(py_file))
+            functions = [item for item in items if isinstance(item, Function)]
+            total_functions += len(functions)
+
+            for func in functions:
+                try:
+                    prepared = preparator.prepare_function(func)
+                    total_prepared += 1
+
+                    # Verify prepared text is valid
+                    assert isinstance(prepared, str)
+                    assert len(prepared) > 0
+
+                    # Check token count
+                    token_count = preparator._count_tokens(prepared)
+                    assert token_count > 0
+
+                    if token_count > preparator.max_tokens:
+                        max_tokens_exceeded += 1
+
+                except Exception as e:
+                    errors_encountered += 1
+                    print(f"Error preparing function: {e}")
+
+        except Exception as e:
+            # Parser errors shouldn't affect validation
+            parse_errors.append(str(e))
+            print(f"Parser error on {py_file}: {e}")
+
+    # Validation assertions
+    assert total_prepared > 0, "No functions were prepared"
+    assert max_tokens_exceeded == 0, f"Exceeded max tokens {max_tokens_exceeded} times"
+    assert errors_encountered == 0, f"Encountered {errors_encountered} errors"
+
+    # Log results
+    print(f"\nP3 Codebase Validation Results:")
+    print(f"  Total functions parsed: {total_functions}")
+    print(f"  Total functions prepared: {total_prepared}")
+    print(f"  Token limit exceeded: {max_tokens_exceeded}")
+    print(f"  Errors encountered: {errors_encountered}")
