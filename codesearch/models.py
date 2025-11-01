@@ -1,7 +1,7 @@
 """Data models for codesearch."""
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Dict, List, Optional, Set, Tuple
 
 
 @dataclass
@@ -95,3 +95,156 @@ class Function:
         elif self.parent_function:
             return f"{self.parent_function}.{self.name}"
         return self.name
+
+
+@dataclass
+class Import:
+    """Represents an import statement in source code."""
+
+    module: str  # e.g., 'os', 'mymodule.submodule'
+    names: Dict[str, Optional[str]]  # Maps imported name to alias (None if no alias)
+    # e.g., {'func': None} for 'from x import func'
+    # e.g., {'func': 'renamed'} for 'from x import func as renamed'
+    # e.g., {'os': None} for 'import os'
+    import_type: str  # 'import' or 'from'
+    file_path: str
+    line_number: int
+
+    def get_original_name(self, alias: str) -> Optional[str]:
+        """Get the original name that was imported with a given alias.
+
+        Args:
+            alias: The imported name (possibly aliased)
+
+        Returns:
+            The original module.name or None if not found
+        """
+        for original, actual_alias in self.names.items():
+            if actual_alias == alias or (actual_alias is None and original == alias):
+                if self.import_type == "from":
+                    return f"{self.module}.{original}"
+                else:
+                    return original
+        return None
+
+
+@dataclass
+class CallGraph:
+    """Represents the call graph for a codebase."""
+
+    functions: Dict[str, Function] = field(default_factory=dict)  # keyed by fully_qualified_name
+    classes: Dict[str, Class] = field(default_factory=dict)
+    imports: Dict[str, List[Import]] = field(default_factory=dict)  # keyed by file_path
+
+    def add_function(self, func: Function) -> None:
+        """Add a function to the graph."""
+        key = f"{func.file_path}:{func.line_number}"
+        self.functions[key] = func
+
+    def add_class(self, cls: Class) -> None:
+        """Add a class to the graph."""
+        key = f"{cls.file_path}:{cls.line_number}"
+        self.classes[key] = cls
+
+    def add_imports(self, file_path: str, imports: List[Import]) -> None:
+        """Add imports for a file."""
+        self.imports[file_path] = imports
+
+    def resolve_call(
+        self, caller_file: str, call_name: str, imports: List[Import]
+    ) -> Optional[Tuple[str, Function]]:
+        """Resolve a function call to an actual Function object.
+
+        Args:
+            caller_file: Path of the file containing the call
+            call_name: Name of the function being called
+            imports: List of imports in the caller file
+
+        Returns:
+            Tuple of (function_key, Function) or None if not found
+        """
+        # Try to find in same file first
+        for func_key, func in self.functions.items():
+            if func.file_path == caller_file and func.name == call_name:
+                return (func_key, func)
+
+        # Try to resolve through imports
+        for imp in imports:
+            if call_name in imp.names:
+                # Check if this import provides this function
+                if imp.import_type == "from":
+                    full_name = f"{imp.module}.{call_name}"
+                    # Try to find function from that module
+                    for func_key, func in self.functions.items():
+                        if func.name == call_name and func.file_path.endswith(
+                            imp.module.replace(".", "/") + ".py"
+                        ):
+                            return (func_key, func)
+
+        return None
+
+    def build_called_by(self) -> None:
+        """Build the called_by relationships for all functions."""
+        # Clear existing called_by
+        for func in self.functions.values():
+            func.called_by = []
+
+        # For each function, resolve its calls
+        for caller_key, caller in self.functions.items():
+            caller_file = caller.file_path
+            caller_imports = self.imports.get(caller_file, [])
+
+            for call_name in caller.calls_to:
+                result = self.resolve_call(caller_file, call_name, caller_imports)
+                if result:
+                    callee_key, callee = result
+                    # Add caller to callee's called_by list
+                    if caller_key not in callee.called_by:
+                        callee.called_by.append(caller_key)
+
+    def get_call_chain(self, start_func_key: str) -> Set[str]:
+        """Get all functions transitively called by a given function.
+
+        Args:
+            start_func_key: Function to start from
+
+        Returns:
+            Set of function keys that are called (directly or indirectly)
+        """
+        visited = set()
+        stack = [start_func_key]
+
+        while stack:
+            func_key = stack.pop()
+            if func_key in visited:
+                continue
+            visited.add(func_key)
+
+            func = self.functions.get(func_key)
+            if func:
+                # Resolve all calls made by this function
+                caller_file = func.file_path
+                caller_imports = self.imports.get(caller_file, [])
+
+                for call_name in func.calls_to:
+                    result = self.resolve_call(caller_file, call_name, caller_imports)
+                    if result:
+                        callee_key, _ = result
+                        if callee_key not in visited:
+                            stack.append(callee_key)
+
+        return visited - {start_func_key}  # Exclude the starting function
+
+    def get_callers(self, func_key: str) -> Set[str]:
+        """Get all functions that call a given function (directly).
+
+        Args:
+            func_key: Function to get callers for
+
+        Returns:
+            Set of function keys that call this function
+        """
+        func = self.functions.get(func_key)
+        if func:
+            return set(func.called_by)
+        return set()

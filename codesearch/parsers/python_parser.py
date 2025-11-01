@@ -1,9 +1,9 @@
 """Python code parser using the ast module."""
 
 import ast
-from typing import List, Optional, Set, Union
+from typing import List, Optional, Set, Tuple, Union
 
-from codesearch.models import Class, Function
+from codesearch.models import CallGraph, Class, Function, Import
 from codesearch.parsers.base import BaseParser
 
 
@@ -290,3 +290,98 @@ class PythonParser(BaseParser):
                 )
 
         return methods
+
+    def extract_imports(self, file_path: str) -> List[Import]:
+        """
+        Extract import statements from a Python file.
+
+        Args:
+            file_path: Path to the Python file
+
+        Returns:
+            List of Import objects
+        """
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                source = f.read()
+        except IOError as e:
+            raise IOError(f"Cannot read file {file_path}: {e}")
+
+        try:
+            tree = ast.parse(source)
+        except SyntaxError as e:
+            raise SyntaxError(f"Syntax error in {file_path}: {e}")
+
+        imports = []
+
+        for node in tree.body:
+            if isinstance(node, ast.Import):
+                # Handle: import x, import x as y, import x.y.z
+                for alias in node.names:
+                    names = {alias.name: alias.asname}
+                    imports.append(
+                        Import(
+                            module=alias.name,
+                            names=names,
+                            import_type="import",
+                            file_path=file_path,
+                            line_number=node.lineno,
+                        )
+                    )
+            elif isinstance(node, ast.ImportFrom):
+                # Handle: from x import y, from x import y as z
+                if node.module:  # Skip relative imports (from . import x)
+                    names = {}
+                    for alias in node.names:
+                        names[alias.name] = alias.asname
+
+                    imports.append(
+                        Import(
+                            module=node.module,
+                            names=names,
+                            import_type="from",
+                            file_path=file_path,
+                            line_number=node.lineno,
+                        )
+                    )
+
+        return imports
+
+    def build_call_graph(
+        self, extracted_by_file: dict
+    ) -> Tuple[CallGraph, dict]:
+        """
+        Build a call graph from extracted code.
+
+        Args:
+            extracted_by_file: Dict mapping file paths to list of (functions, classes, imports)
+
+        Returns:
+            Tuple of (CallGraph, dict of unresolved calls)
+        """
+        graph = CallGraph()
+        unresolved_calls = {}
+
+        # Add all functions and classes to the graph
+        for file_path, (functions, classes, imports) in extracted_by_file.items():
+            for func in functions:
+                graph.add_function(func)
+
+            for cls in classes:
+                graph.add_class(cls)
+
+            graph.add_imports(file_path, imports)
+
+        # Build called_by relationships
+        graph.build_called_by()
+
+        # Track unresolved calls
+        for file_path, (functions, classes, imports) in extracted_by_file.items():
+            unresolved_calls[file_path] = []
+            for func in functions:
+                for call_name in func.calls_to:
+                    result = graph.resolve_call(file_path, call_name, imports)
+                    if result is None:
+                        unresolved_calls[file_path].append((func.name, call_name))
+
+        return graph, unresolved_calls
