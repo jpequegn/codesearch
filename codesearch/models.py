@@ -1,6 +1,7 @@
 """Data models for codesearch."""
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Dict, List, Optional, Set, Tuple
 
 
@@ -248,3 +249,134 @@ class CallGraph:
         if func:
             return set(func.called_by)
         return set()
+
+
+@dataclass
+class FileMetadata:
+    """Metadata about a source code file."""
+
+    file_path: str
+    language: str
+    size_bytes: int
+    modified_time: datetime
+    is_ignored: bool = False
+    ignore_reason: Optional[str] = None
+
+    def relative_path(self, base_path: str) -> str:
+        """Get relative path from base directory.
+
+        Args:
+            base_path: Base directory path
+
+        Returns:
+            Relative path from base
+        """
+        if self.file_path.startswith(base_path):
+            return self.file_path[len(base_path):].lstrip("/")
+        return self.file_path
+
+
+@dataclass
+class RepositoryScanner:
+    """Configuration and state for scanning repositories."""
+
+    repositories: Dict[str, str] = field(default_factory=dict)  # name -> path
+    supported_languages: Set[str] = field(default_factory=lambda: {"python"})
+    ignored_directories: Set[str] = field(
+        default_factory=lambda: {
+            "__pycache__",
+            ".git",
+            ".venv",
+            "venv",
+            "env",
+            "node_modules",
+            ".egg-info",
+            "dist",
+            "build",
+            ".pytest_cache",
+            ".mypy_cache",
+            ".tox",
+        }
+    )
+    ignored_file_patterns: Set[str] = field(
+        default_factory=lambda: {
+            "*.pyc",
+            "*.pyo",
+            "*.pyd",
+            ".DS_Store",
+            "*.egg-info",
+            ".coverage",
+        }
+    )
+
+    def add_repository(self, name: str, path: str) -> None:
+        """Add a repository to scan.
+
+        Args:
+            name: Name/identifier for the repository
+            path: File system path to the repository
+        """
+        self.repositories[name] = path
+
+    def should_scan_directory(self, dir_name: str) -> bool:
+        """Check if a directory should be scanned.
+
+        Args:
+            dir_name: Directory name (not full path)
+
+        Returns:
+            True if directory should be scanned
+        """
+        return dir_name not in self.ignored_directories
+
+    def should_scan_file(self, file_path: str, language: str) -> bool:
+        """Check if a file should be scanned.
+
+        Args:
+            file_path: Full file path
+            language: Detected language for file
+
+        Returns:
+            True if file should be scanned
+        """
+        # Check if language is supported
+        if language not in self.supported_languages:
+            return False
+
+        # Check if file matches ignored patterns
+        file_name = file_path.split("/")[-1]
+        for pattern in self.ignored_file_patterns:
+            if pattern.startswith("*."):
+                ext = pattern[2:]
+                if file_name.endswith(f".{ext}"):
+                    return False
+            elif file_name == pattern:
+                return False
+
+        return True
+
+    def get_language_from_extension(self, file_path: str) -> Optional[str]:
+        """Detect language from file extension.
+
+        Args:
+            file_path: File path
+
+        Returns:
+            Language name or None if unknown
+        """
+        extension_map = {
+            ".py": "python",
+            ".pyx": "python",
+            ".pyi": "python",
+            ".js": "javascript",
+            ".ts": "typescript",
+            ".go": "go",
+            ".rs": "rust",
+            ".java": "java",
+        }
+
+        for ext, lang in extension_map.items():
+            if file_path.endswith(ext):
+                return lang
+
+        return None
