@@ -266,3 +266,51 @@ def test_mixed_cache_hit_miss():
         assert result["summary"]["cached"] == 1
         assert result["summary"]["newly_embedded"] == 1
         assert result["summary"]["success"] == 2
+
+
+def test_batch_continues_on_error():
+    """Test that batch processing continues when one item fails."""
+    generator = EmbeddingGenerator()
+    preparator = TextPreparator(generator.tokenizer, max_tokens=512)
+    batch_gen = BatchEmbeddingGenerator(generator, preparator)
+
+    # Create function with invalid docstring that would cause issues
+    functions = [
+        Function(
+            name="good", file_path="/test.py", language="python",
+            source_code="def good(): return 1",
+            docstring="Good function.", line_number=1,
+        ),
+        # This should fail or be handled gracefully
+        Function(
+            name="empty", file_path="/test.py", language="python",
+            source_code="",  # Empty code
+            docstring=None, line_number=5,
+        ),
+        Function(
+            name="also_good", file_path="/test.py", language="python",
+            source_code="def also_good(): return 2",
+            docstring="Also good.", line_number=10,
+        ),
+    ]
+
+    result = batch_gen.process_functions(functions)
+
+    # Should have processed 3, succeeded on at least 2
+    assert result["summary"]["total"] == 3
+    assert result["summary"]["success"] >= 2
+    # Batch should not crash
+    assert "summary" in result
+
+
+def test_empty_batch():
+    """Test processing empty batch."""
+    generator = EmbeddingGenerator()
+    preparator = TextPreparator(generator.tokenizer, max_tokens=512)
+    batch_gen = BatchEmbeddingGenerator(generator, preparator)
+
+    result = batch_gen.process_functions([])
+
+    assert result["summary"]["total"] == 0
+    assert result["summary"]["success"] == 0
+    assert len(result["embeddings"]) == 0

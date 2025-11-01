@@ -144,6 +144,11 @@ class BatchEmbeddingGenerator:
             else:
                 text = self.text_preparator.prepare_class(item)
 
+            # Handle empty text
+            if not text or not text.strip():
+                print(f"Warning: Empty text for {item.name}")
+                return None
+
             # Generate embedding
             embedding = self.embedding_generator.embed_code(text)
 
