@@ -129,6 +129,9 @@ dmypy.json
 *.swo
 *~
 
+# Git worktrees
+.worktrees/
+
 # LanceDB
 .lancedb/
 *.lance
