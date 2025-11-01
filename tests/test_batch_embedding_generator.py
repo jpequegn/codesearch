@@ -127,3 +127,76 @@ def test_load_existing_cache():
         # Verify cache loaded
         assert "/existing.py:10" in batch_gen.cache
         assert batch_gen.cache["/existing.py:10"]["name"] == "existing_func"
+
+
+def test_process_single_function():
+    """Test processing a single function."""
+    generator = EmbeddingGenerator()
+    preparator = TextPreparator(generator.tokenizer, max_tokens=512)
+    batch_gen = BatchEmbeddingGenerator(generator, preparator)
+
+    func = Function(
+        name="add",
+        file_path="/test.py",
+        language="python",
+        source_code="def add(a, b):\n    return a + b",
+        docstring="Add two numbers.",
+        line_number=1,
+    )
+
+    result = batch_gen.process_functions([func])
+
+    # Should return dict with summary and embeddings
+    assert "summary" in result
+    assert "embeddings" in result
+    assert result["summary"]["total"] == 1
+    assert result["summary"]["success"] == 1
+    assert "/test.py:1" in result["embeddings"]
+
+
+def test_process_multiple_functions():
+    """Test processing multiple functions."""
+    generator = EmbeddingGenerator()
+    preparator = TextPreparator(generator.tokenizer, max_tokens=512)
+    batch_gen = BatchEmbeddingGenerator(generator, preparator)
+
+    functions = [
+        Function(
+            name="add", file_path="/test.py", language="python",
+            source_code="def add(a, b):\n    return a + b",
+            docstring="Add numbers.", line_number=1,
+        ),
+        Function(
+            name="sub", file_path="/test.py", language="python",
+            source_code="def sub(a, b):\n    return a - b",
+            docstring="Subtract numbers.", line_number=5,
+        ),
+    ]
+
+    result = batch_gen.process_functions(functions)
+
+    assert result["summary"]["total"] == 2
+    assert result["summary"]["success"] == 2
+    assert len(result["embeddings"]) == 2
+
+
+def test_process_classes():
+    """Test processing classes."""
+    generator = EmbeddingGenerator()
+    preparator = TextPreparator(generator.tokenizer, max_tokens=512)
+    batch_gen = BatchEmbeddingGenerator(generator, preparator)
+
+    cls = Class(
+        name="Calculator",
+        file_path="/test.py",
+        language="python",
+        source_code="class Calculator:\n    pass",
+        docstring="A calculator class.",
+        line_number=10,
+    )
+
+    result = batch_gen.process_classes([cls])
+
+    assert result["summary"]["total"] == 1
+    assert result["summary"]["success"] == 1
+    assert "/test.py:10" in result["embeddings"]
