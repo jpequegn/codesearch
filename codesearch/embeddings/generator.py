@@ -35,12 +35,8 @@ class EmbeddingGenerator:
             self.device = self.model_config.device
 
         # Load model and tokenizer from HuggingFace
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            self.model_config.model_name
-        )
-        self.model = AutoModel.from_pretrained(
-            self.model_config.model_name
-        ).to(self.device)
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_config.model_name)
+        self.model = AutoModel.from_pretrained(self.model_config.model_name).to(self.device)
 
         # Set to eval mode (no gradients)
         self.model.eval()
