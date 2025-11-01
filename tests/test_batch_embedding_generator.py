@@ -397,3 +397,43 @@ def test_integration_end_to_end_with_real_models():
     emb1 = result["embeddings"]["/validators.py:1"]
     emb2 = result["embeddings"]["/validators.py:10"]
     assert emb1 != emb2
+
+
+def test_real_codebase_p3_validation():
+    """Validate batch embedding on real P3 codebase."""
+    from pathlib import Path
+    from codesearch.parsers.python_parser import PythonParser
+
+    generator = EmbeddingGenerator()
+    preparator = TextPreparator(generator.tokenizer, max_tokens=512)
+    batch_gen = BatchEmbeddingGenerator(generator, preparator)
+    parser = PythonParser()
+
+    # Test on P3 codebase
+    p3_path = Path("/Users/julienpequegnot/Code/parakeet-podcast-processor/src")
+
+    if not p3_path.exists():
+        pytest.skip("P3 codebase not available for testing")
+
+    python_files = list(p3_path.rglob("*.py"))
+    assert len(python_files) > 0, "No Python files found in P3"
+
+    total_functions = 0
+    total_embedded = 0
+
+    for py_file in python_files[:10]:  # Test first 10 files
+        try:
+            functions, classes = parser.parse(str(py_file))
+            total_functions += len(functions)
+
+            result = batch_gen.process_functions(functions)
+            total_embedded += result["summary"]["success"]
+        except Exception as e:
+            print(f"Warning: Failed to process {py_file}: {e}")
+
+    # Verify reasonable success
+    assert total_functions > 0
+    assert total_embedded > 0
+    assert total_embedded >= total_functions * 0.8  # At least 80% success
+
+    print(f"\nP3 Validation: {total_functions} functions, {total_embedded} embedded")
