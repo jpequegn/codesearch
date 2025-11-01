@@ -515,3 +515,132 @@ def test_prepare_long_function_truncation(tokenizer):
     # Must respect token limit
     token_count = preparator._count_tokens(prepared)
     assert token_count <= 100
+
+
+def test_prepare_function_empty_code(tokenizer):
+    """Test preparing function with empty source code."""
+    preparator = TextPreparator(tokenizer, max_tokens=512)
+
+    func = Function(
+        name="empty_func",
+        file_path="/test.py",
+        language="python",
+        source_code="",
+        docstring="Function with no implementation.",
+        line_number=1,
+    )
+
+    # Should not raise, should return graceful fallback
+    prepared = preparator.prepare_function(func)
+    assert isinstance(prepared, str)
+    assert len(prepared) > 0
+
+
+def test_prepare_function_no_docstring(tokenizer):
+    """Test preparing function with no docstring."""
+    preparator = TextPreparator(tokenizer, max_tokens=512)
+
+    func = Function(
+        name="nodoc",
+        file_path="/test.py",
+        language="python",
+        source_code="def nodoc(): pass",
+        docstring=None,
+        line_number=1,
+    )
+
+    prepared = preparator.prepare_function(func)
+    assert "def nodoc" in prepared
+
+
+def test_prepare_function_empty_docstring(tokenizer):
+    """Test preparing function with empty string docstring."""
+    preparator = TextPreparator(tokenizer, max_tokens=512)
+
+    func = Function(
+        name="empty_doc",
+        file_path="/test.py",
+        language="python",
+        source_code="def empty_doc(): return 1",
+        docstring="",
+        line_number=1,
+    )
+
+    prepared = preparator.prepare_function(func)
+    assert "def empty_doc" in prepared
+
+
+def test_prepare_class_with_no_docstring(tokenizer):
+    """Test preparing class with no docstring."""
+    preparator = TextPreparator(tokenizer, max_tokens=512)
+
+    cls = Class(
+        name="NoDocClass",
+        file_path="/test.py",
+        language="python",
+        source_code="class NoDocClass:\n    pass",
+        docstring=None,
+        line_number=1,
+    )
+
+    prepared = preparator.prepare_class(cls)
+    assert "NoDocClass" in prepared
+
+
+def test_prepare_batch_with_empty_list(tokenizer):
+    """Test batch preparation with empty list."""
+    preparator = TextPreparator(tokenizer, max_tokens=512)
+
+    result = preparator.prepare_batch([])
+
+    assert isinstance(result, list)
+    assert len(result) == 0
+
+
+def test_prepare_batch_mixed_items(tokenizer):
+    """Test batch preparation with both functions and classes."""
+    preparator = TextPreparator(tokenizer, max_tokens=512)
+
+    func = Function(
+        name="func1",
+        file_path="/test.py",
+        language="python",
+        source_code="def func1(): pass",
+        docstring="A function.",
+        line_number=1,
+    )
+
+    cls = Class(
+        name="Class1",
+        file_path="/test.py",
+        language="python",
+        source_code="class Class1: pass",
+        docstring="A class.",
+        line_number=5,
+    )
+
+    results = preparator.prepare_batch([func, cls])
+
+    assert len(results) == 2
+    assert "func1" in results[0]
+    assert "Class1" in results[1]
+
+
+def test_prepare_function_with_unicode(tokenizer):
+    """Test preparing function with unicode characters."""
+    preparator = TextPreparator(tokenizer, max_tokens=512)
+
+    func = Function(
+        name="unicode_func",
+        file_path="/test.py",
+        language="python",
+        source_code='def unicode_func():\n    # 日本語コメント\n    return "你好"',
+        docstring="Unicode aware function. 🚀",
+        line_number=1,
+    )
+
+    prepared = preparator.prepare_function(func)
+
+    # Should not raise, should handle unicode gracefully
+    assert isinstance(prepared, str)
+    assert len(prepared) > 0
