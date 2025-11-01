@@ -387,7 +387,7 @@ class EmbeddingModel:
     """Configuration for an embedding model."""
 
     name: str                      # e.g., "codebert-base"
-    model_name: str                # HuggingFace model ID
+    model_name: str                # HuggingFace model ID (e.g., "microsoft/codebert-base")
     dimensions: int                # Vector size (e.g., 768)
     max_length: int                # Max input tokens (e.g., 512)
     device: str = "auto"           # "cpu", "cuda", or "auto"
