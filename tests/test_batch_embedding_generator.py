@@ -314,3 +314,86 @@ def test_empty_batch():
     assert result["summary"]["total"] == 0
     assert result["summary"]["success"] == 0
     assert len(result["embeddings"]) == 0
+
+
+def test_integration_with_full_pipeline():
+    """Test complete pipeline: Parser → TextPreparator → BatchEmbeddingGenerator."""
+    generator = EmbeddingGenerator()
+    preparator = TextPreparator(generator.tokenizer, max_tokens=512)
+    batch_gen = BatchEmbeddingGenerator(generator, preparator)
+
+    functions = [
+        Function(
+            name="calculate",
+            file_path="/math.py",
+            language="python",
+            source_code="def calculate(a, b):\n    # TODO: add more operations\n    return a + b",
+            docstring="Calculate sum of two numbers.",
+            line_number=1,
+        ),
+        Function(
+            name="process",
+            file_path="/math.py",
+            language="python",
+            source_code="def process(data):\n    # important comment\n    return sum(data)",
+            docstring="Process data list.",
+            line_number=10,
+        ),
+    ]
+
+    result = batch_gen.process_functions(functions)
+
+    # Verify full pipeline worked
+    assert result["summary"]["success"] == 2
+    assert len(result["embeddings"]) == 2
+
+    # Verify embeddings are valid
+    for key, embedding in result["embeddings"].items():
+        assert embedding is not None
+        assert isinstance(embedding, list)
+        assert len(embedding) == 768
+
+
+def test_integration_end_to_end_with_real_models():
+    """Test end-to-end with real EmbeddingGenerator and TextPreparator."""
+    generator = EmbeddingGenerator()
+    preparator = TextPreparator(generator.tokenizer, max_tokens=512)
+    batch_gen = BatchEmbeddingGenerator(generator, preparator)
+
+    # Create realistic functions
+    functions = [
+        Function(
+            name="validate_input",
+            file_path="/validators.py",
+            language="python",
+            source_code="""def validate_input(data):
+    # TODO: add type checking
+    if not data:
+        raise ValueError("Empty data")
+    return True""",
+            docstring="Validate input data before processing.",
+            line_number=1,
+        ),
+        Function(
+            name="transform_data",
+            file_path="/validators.py",
+            language="python",
+            source_code="""def transform_data(items):
+    \"\"\"Transform items into output format.\"\"\"
+    return [item.upper() for item in items]""",
+            docstring="Transform items to uppercase.",
+            line_number=10,
+        ),
+    ]
+
+    result = batch_gen.process_functions(functions)
+
+    # All should succeed
+    assert result["summary"]["total"] == 2
+    assert result["summary"]["success"] == 2
+    assert result["summary"]["failed"] == 0
+
+    # Verify embeddings are distinct
+    emb1 = result["embeddings"]["/validators.py:1"]
+    emb2 = result["embeddings"]["/validators.py:10"]
+    assert emb1 != emb2
