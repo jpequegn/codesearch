@@ -1,6 +1,6 @@
 """Embedding generation using transformer models."""
 
-from typing import Optional
+from typing import List, Optional
 from transformers import AutoTokenizer, AutoModel
 import torch
 
@@ -54,3 +54,33 @@ class EmbeddingGenerator:
             "max_length": self.model_config.max_length,
             "device": self.device,
         }
+
+    def embed_code(self, code_text: str) -> List[float]:
+        """
+        Generate embedding for a single code snippet.
+
+        Args:
+            code_text: Source code as string
+
+        Returns:
+            768-dimensional embedding vector (normalized)
+        """
+        # Tokenize input
+        inputs = self.tokenizer(
+            code_text,
+            return_tensors="pt",
+            truncation=True,
+            max_length=self.model_config.max_length,
+            padding=True,
+        ).to(self.device)
+
+        # Generate embedding
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+            # Use [CLS] token embedding (first token)
+            embedding = outputs.last_hidden_state[:, 0, :].cpu()
+
+        # L2 normalize
+        embedding = torch.nn.functional.normalize(embedding, p=2, dim=1)
+
+        return embedding[0].tolist()
