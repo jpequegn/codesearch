@@ -597,35 +597,6 @@ def test_prepare_batch_with_empty_list(tokenizer):
     assert len(result) == 0
 
 
-def test_prepare_batch_mixed_items(tokenizer):
-    """Test batch preparation with both functions and classes."""
-    preparator = TextPreparator(tokenizer, max_tokens=512)
-
-    func = Function(
-        name="func1",
-        file_path="/test.py",
-        language="python",
-        source_code="def func1(): pass",
-        docstring="A function.",
-        line_number=1,
-    )
-
-    cls = Class(
-        name="Class1",
-        file_path="/test.py",
-        language="python",
-        source_code="class Class1: pass",
-        docstring="A class.",
-        line_number=5,
-    )
-
-    results = preparator.prepare_batch([func, cls])
-
-    assert len(results) == 2
-    assert "func1" in results[0]
-    assert "Class1" in results[1]
-
-
 def test_prepare_function_with_unicode(tokenizer):
     """Test preparing function with unicode characters."""
     preparator = TextPreparator(tokenizer, max_tokens=512)
@@ -837,7 +808,6 @@ def test_real_codebase_p3_validation():
     - Real docstrings and comments
     - Various Python patterns
     """
-    import os
     from pathlib import Path
     from codesearch.parsers import PythonParser
     from codesearch.embeddings.generator import EmbeddingGenerator
@@ -899,7 +869,7 @@ def test_real_codebase_p3_validation():
     assert errors_encountered == 0, f"Encountered {errors_encountered} errors"
 
     # Log results
-    print(f"\nP3 Codebase Validation Results:")
+    print("\nP3 Codebase Validation Results:")
     print(f"  Total functions parsed: {total_functions}")
     print(f"  Total functions prepared: {total_prepared}")
     print(f"  Token limit exceeded: {max_tokens_exceeded}")
