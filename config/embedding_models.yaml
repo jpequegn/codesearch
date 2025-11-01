@@ -1,0 +1,34 @@
+# Embedding model configurations
+models:
+  codebert-base:
+    name: codebert-base
+    model_name: microsoft/codebert-base
+    dimensions: 768
+    max_length: 512
+    description: "CodeBERT base model, balanced performance"
+    languages: [python, javascript, java, go]
+
+  codebert-small:
+    name: codebert-small
+    model_name: microsoft/codebert-small
+    dimensions: 384
+    max_length: 512
+    description: "Smaller, faster CodeBERT variant"
+    languages: [python, javascript, java, go]
+
+  codet5-base:
+    name: codet5-base
+    model_name: Salesforce/codet5-base
+    dimensions: 768
+    max_length: 512
+    description: "CodeT5 model with better semantic understanding"
+    languages: [python, javascript, java, go, php, ruby]
+
+# Default model to use
+default: codebert-base
+
+# Cache directory for downloaded models
+cache_dir: ~/.codesearch/models
+
+# Device preference
+device: auto  # auto (cuda if available, else cpu), cuda, cpu

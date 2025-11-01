@@ -1,6 +1,8 @@
 """Tests for embedding model and generator."""
 
 import pytest
+import yaml
+import os
 from codesearch.models import EmbeddingModel
 from codesearch.embeddings.generator import EmbeddingGenerator
 
@@ -178,3 +180,68 @@ def test_embed_batch_consistency_with_single():
 
     # Should match
     assert single_emb == batch_embs[0]
+
+
+def test_embedding_models_config_exists():
+    """Test that embedding models config file exists."""
+    config_path = "config/embedding_models.yaml"
+    assert os.path.exists(config_path), f"Config file not found: {config_path}"
+
+
+def test_embedding_models_config_valid():
+    """Test that config file is valid YAML with required fields."""
+    with open("config/embedding_models.yaml", "r") as f:
+        config = yaml.safe_load(f)
+
+    assert "models" in config
+    assert "default" in config
+    assert config["default"] in config["models"]
+
+    # Each model should have required fields
+    for model_name, model_config in config["models"].items():
+        assert "model_name" in model_config
+        assert "dimensions" in model_config
+        assert "max_length" in model_config
+
+
+def test_embedding_models_config_structure():
+    """Test that config file has proper structure for each model."""
+    with open("config/embedding_models.yaml", "r") as f:
+        config = yaml.safe_load(f)
+
+    # Check models structure
+    assert isinstance(config["models"], dict)
+    assert len(config["models"]) >= 2
+
+    # Check each model has necessary fields
+    for model_name, model_config in config["models"].items():
+        assert isinstance(model_config, dict)
+        assert "name" in model_config
+        assert "model_name" in model_config
+        assert "dimensions" in model_config
+        assert "max_length" in model_config
+        # Check types
+        assert isinstance(model_config["dimensions"], int)
+        assert isinstance(model_config["max_length"], int)
+        assert model_config["dimensions"] > 0
+        assert model_config["max_length"] > 0
+
+
+def test_embedding_models_config_device():
+    """Test that config file has valid device setting."""
+    with open("config/embedding_models.yaml", "r") as f:
+        config = yaml.safe_load(f)
+
+    assert "device" in config
+    device = config["device"]
+    assert device in ["auto", "cuda", "cpu"]
+
+
+def test_embedding_models_config_cache_dir():
+    """Test that config file has cache directory setting."""
+    with open("config/embedding_models.yaml", "r") as f:
+        config = yaml.safe_load(f)
+
+    assert "cache_dir" in config
+    assert isinstance(config["cache_dir"], str)
+    assert len(config["cache_dir"]) > 0
