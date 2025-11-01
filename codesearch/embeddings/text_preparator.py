@@ -54,7 +54,7 @@ class TextPreparator:
 
             return text
 
-        except Exception as e:
+        except Exception:
             # Log error but never fail completely
             # Try fallbacks in order
             if func.docstring and func.docstring.strip():
@@ -94,7 +94,7 @@ class TextPreparator:
 
             return text
 
-        except Exception as e:
+        except Exception:
             # Log error but never fail completely
             # Try fallbacks in order
             if cls.docstring and cls.docstring.strip():
@@ -124,7 +124,7 @@ class TextPreparator:
                 else:
                     result = ""
                 results.append(result)
-            except Exception as e:
+            except Exception:
                 # Continue processing others, append error fallback
                 if isinstance(item, Function):
                     results.append(f"{item.name} function")
@@ -148,7 +148,6 @@ class TextPreparator:
             return code
 
         try:
-            import re
 
             IMPORTANT_KEYWORDS = {
                 'TODO', 'FIXME', 'NOTE', 'BUG', 'HACK',
