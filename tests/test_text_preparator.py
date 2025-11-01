@@ -201,3 +201,140 @@ def test_combine_text_empty_docstring(tokenizer):
 
     # Empty string is falsy, so should just return source code
     assert result == "def func():\n    pass"
+
+
+def test_combine_docstring_and_code(tokenizer):
+    """Test combining docstring and source code."""
+    preparator = TextPreparator(tokenizer, max_tokens=512)
+
+    docstring = "Calculate sum of two numbers."
+    code = "def add(a, b):\n    return a + b"
+
+    func = Function(
+        name="add",
+        file_path="/test.py",
+        language="python",
+        source_code=code,
+        docstring=docstring,
+        line_number=1,
+    )
+
+    prepared = preparator.prepare_function(func)
+
+    # Should have both docstring and code
+    assert prepared.startswith(docstring)
+    assert "def add" in prepared
+    # Should have separator
+    assert "\n\n" in prepared
+
+
+def test_combine_no_docstring(tokenizer):
+    """Test that code-only functions work."""
+    preparator = TextPreparator(tokenizer, max_tokens=512)
+
+    code = "def hello():\n    return 'world'"
+
+    func = Function(
+        name="hello",
+        file_path="/test.py",
+        language="python",
+        source_code=code,
+        docstring=None,
+        line_number=1,
+    )
+
+    prepared = preparator.prepare_function(func)
+
+    # Should just be the code
+    assert prepared == code
+    assert "def hello" in prepared
+
+
+def test_combine_empty_docstring(tokenizer):
+    """Test empty docstring handling."""
+    preparator = TextPreparator(tokenizer, max_tokens=512)
+
+    code = "def test(): pass"
+
+    func = Function(
+        name="test",
+        file_path="/test.py",
+        language="python",
+        source_code=code,
+        docstring="",
+        line_number=1,
+    )
+
+    prepared = preparator.prepare_function(func)
+
+    # Empty docstring should be treated as no docstring
+    assert prepared == code
+
+
+def test_prepare_class(tokenizer):
+    """Test preparing a class for embedding."""
+    preparator = TextPreparator(tokenizer, max_tokens=512)
+
+    cls_doc = "A simple calculator class."
+    cls_code = "class Calculator:\n    def add(self, a, b):\n        return a + b"
+
+    cls = Class(
+        name="Calculator",
+        file_path="/test.py",
+        language="python",
+        source_code=cls_code,
+        docstring=cls_doc,
+        line_number=1,
+    )
+
+    prepared = preparator.prepare_class(cls)
+
+    # Should have both docstring and code
+    assert "A simple calculator" in prepared
+    assert "class Calculator" in prepared
+
+
+def test_prepare_class_no_docstring(tokenizer):
+    """Test preparing a class without docstring."""
+    preparator = TextPreparator(tokenizer, max_tokens=512)
+
+    cls_code = "class Empty:\n    pass"
+
+    cls = Class(
+        name="Empty",
+        file_path="/test.py",
+        language="python",
+        source_code=cls_code,
+        docstring=None,
+        line_number=1,
+    )
+
+    prepared = preparator.prepare_class(cls)
+
+    # Should just be the code
+    assert prepared == cls_code
+    assert "class Empty" in prepared
+
+
+def test_separator_in_combined_text(tokenizer):
+    """Test that separator is present when both docstring and code exist."""
+    preparator = TextPreparator(tokenizer, max_tokens=512)
+
+    func = Function(
+        name="test",
+        file_path="/test.py",
+        language="python",
+        source_code="def test(): return 1",
+        docstring="Test function.",
+        line_number=1,
+    )
+
+    prepared = preparator.prepare_function(func)
+
+    # Check separator exists
+    assert "\n\n" in prepared
+    # Check order: docstring first, then code
+    parts = prepared.split("\n\n")
+    assert len(parts) == 2
+    assert parts[0] == "Test function."
+    assert "def test" in parts[1]
