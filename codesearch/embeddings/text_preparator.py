@@ -34,7 +34,7 @@ class TextPreparator:
         try:
             text = self._combine_text(func.docstring, func.source_code)
             text = self._filter_comments(text)
-            # Token counting and truncation will be added in Task 4
+            text = self._truncate_to_tokens(text)
             return text
         except Exception:
             # Fallback will be added in Task 5
@@ -53,7 +53,7 @@ class TextPreparator:
         try:
             text = self._combine_text(cls.docstring, cls.source_code)
             text = self._filter_comments(text)
-            # Token counting and truncation will be added in Task 4
+            text = self._truncate_to_tokens(text)
             return text
         except Exception:
             # Fallback will be added in Task 5
@@ -147,3 +147,42 @@ class TextPreparator:
         if docstring:
             return f"{docstring}\n\n{source_code}"
         return source_code
+
+    def _count_tokens(self, text: str) -> int:
+        """Count tokens in text using the embedding model's tokenizer."""
+        if not text or not text.strip():
+            return 0
+        try:
+            tokens = self.tokenizer.encode(text)
+            return len(tokens)
+        except Exception:
+            # Fallback: rough estimate (1 token ≈ 4 characters)
+            return max(1, len(text) // 4)
+
+    def _truncate_to_tokens(self, text: str) -> str:
+        """Truncate text to stay within token limit while preserving semantics.
+
+        Strategies (in order):
+        1. Keep all text if under limit
+        2. Keep first N lines if over limit
+        3. Keep docstring/signature only as fallback
+        """
+        token_count = self._count_tokens(text)
+        if token_count <= self.max_tokens:
+            return text
+
+        # Strategy 1: Keep first N lines
+        lines = text.split('\n')
+        for i in range(len(lines), 0, -1):
+            truncated = '\n'.join(lines[:i])
+            if self._count_tokens(truncated) <= self.max_tokens:
+                return truncated
+
+        # Strategy 2: Keep just first line (function signature or docstring)
+        if lines:
+            first_line = lines[0]
+            if self._count_tokens(first_line) <= self.max_tokens:
+                return first_line
+
+        # Strategy 3: Return empty string (last resort)
+        return ""

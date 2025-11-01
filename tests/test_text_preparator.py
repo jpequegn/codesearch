@@ -421,3 +421,97 @@ def test_prepare_with_comment_filtering(tokenizer):
     assert "TODO" in prepared
     # Trivial comments removed
     assert "double it" not in prepared
+
+
+def test_count_tokens_simple(tokenizer):
+    """Test token counting functionality."""
+    preparator = TextPreparator(tokenizer, max_tokens=512)
+
+    code = "def hello(): return 'world'"
+    count = preparator._count_tokens(code)
+
+    # Should be positive integer
+    assert isinstance(count, int)
+    assert count > 0
+    assert count < 512  # Under max
+
+
+def test_truncate_under_limit(tokenizer):
+    """Test that text under token limit is not truncated."""
+    preparator = TextPreparator(tokenizer, max_tokens=512)
+
+    code = "def simple(): return 42"
+    truncated = preparator._truncate_to_tokens(code)
+
+    # Should be identical if under limit
+    assert truncated == code
+
+
+def test_truncate_over_limit(tokenizer):
+    """Test that text over token limit gets truncated intelligently."""
+    preparator = TextPreparator(tokenizer, max_tokens=100)  # Very small limit
+
+    # Create code that exceeds token limit
+    long_code = "def process():\n    " + "\n    ".join([f"x{i} = {i}" for i in range(50)])
+
+    truncated = preparator._truncate_to_tokens(long_code)
+
+    # Should be truncated
+    assert len(truncated) < len(long_code)
+    # Token count should respect limit
+    token_count = preparator._count_tokens(truncated)
+    assert token_count <= 100
+
+
+def test_truncate_preserves_docstring(tokenizer):
+    """Test that truncation always preserves docstring if present."""
+    preparator = TextPreparator(tokenizer, max_tokens=50)  # Tight limit
+
+    # Create function with docstring and long code
+    long_code = "def f():\n    " + "\n    ".join([f"x{i} = {i}" for i in range(100)])
+    docstring = "Important documentation for this function."
+
+    func = Function(
+        name="f",
+        file_path="/test.py",
+        language="python",
+        source_code=long_code,
+        docstring=docstring,
+        line_number=1,
+    )
+
+    prepared = preparator.prepare_function(func)
+
+    # Docstring should be preserved in truncated output
+    assert docstring in prepared
+    # Should respect token limit
+    assert preparator._count_tokens(prepared) <= 50
+
+
+def test_prepare_long_function_truncation(tokenizer):
+    """Test complete preparation with truncation of long function."""
+    preparator = TextPreparator(tokenizer, max_tokens=100)
+
+    # Create very long function
+    long_code = '''def analyze_data():
+    """Analyze and process large dataset."""
+    # TODO: optimize performance
+    data = load_data()
+    ''' + "\n    ".join([f"result{i} = process(data[{i}])" for i in range(50)])
+
+    func = Function(
+        name="analyze_data",
+        file_path="/test.py",
+        language="python",
+        source_code=long_code,
+        docstring="Analyze and process large dataset.",
+        line_number=1,
+    )
+
+    prepared = preparator.prepare_function(func)
+
+    # Should have important elements
+    assert "Analyze and process" in prepared or "analyze_data" in prepared
+    # Must respect token limit
+    token_count = preparator._count_tokens(prepared)
+    assert token_count <= 100
