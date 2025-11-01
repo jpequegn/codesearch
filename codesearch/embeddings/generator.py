@@ -84,3 +84,37 @@ class EmbeddingGenerator:
         embedding = torch.nn.functional.normalize(embedding, p=2, dim=1)
 
         return embedding[0].tolist()
+
+    def embed_batch(self, code_texts: List[str]) -> List[List[float]]:
+        """
+        Generate embeddings for multiple code snippets (batch).
+
+        Args:
+            code_texts: List of code snippets
+
+        Returns:
+            List of embedding vectors (each is 768-dimensional, normalized)
+        """
+        if not code_texts:
+            return []
+
+        # Tokenize all inputs at once
+        inputs = self.tokenizer(
+            code_texts,
+            return_tensors="pt",
+            truncation=True,
+            max_length=self.model_config.max_length,
+            padding=True,
+        ).to(self.device)
+
+        # Generate embeddings for all at once
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+            # Use [CLS] token embedding (first token)
+            embeddings = outputs.last_hidden_state[:, 0, :]  # (batch_size, 768)
+
+        # L2 normalize
+        embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
+
+        # Convert to list of lists and move to CPU
+        return embeddings.cpu().tolist()

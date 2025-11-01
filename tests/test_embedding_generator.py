@@ -121,3 +121,60 @@ def test_embed_code_long_truncation():
     embedding = generator.embed_code(long_code)
     assert isinstance(embedding, list)
     assert len(embedding) == 768
+
+
+def test_embed_batch_basic():
+    """Test batch embedding generation."""
+    generator = EmbeddingGenerator()
+
+    codes = [
+        "def add(a, b):\n    return a + b",
+        "def subtract(a, b):\n    return a - b",
+        "def multiply(a, b):\n    return a * b",
+    ]
+
+    embeddings = generator.embed_batch(codes)
+
+    # Should return list of embeddings
+    assert isinstance(embeddings, list)
+    assert len(embeddings) == 3
+    # Each embedding should be 768-dimensional
+    for emb in embeddings:
+        assert isinstance(emb, list)
+        assert len(emb) == 768
+
+
+def test_embed_batch_single_item():
+    """Test batch embedding with single item."""
+    generator = EmbeddingGenerator()
+
+    codes = ["def foo(): pass"]
+    embeddings = generator.embed_batch(codes)
+
+    assert len(embeddings) == 1
+    assert len(embeddings[0]) == 768
+
+
+def test_embed_batch_empty_list():
+    """Test batch embedding with empty list."""
+    generator = EmbeddingGenerator()
+
+    embeddings = generator.embed_batch([])
+
+    assert embeddings == []
+
+
+def test_embed_batch_consistency_with_single():
+    """Test that batch results match single embedding results."""
+    generator = EmbeddingGenerator()
+
+    code = "def hello(): return 'world'"
+
+    # Get single embedding
+    single_emb = generator.embed_code(code)
+
+    # Get batch embedding
+    batch_embs = generator.embed_batch([code])
+
+    # Should match
+    assert single_emb == batch_embs[0]
