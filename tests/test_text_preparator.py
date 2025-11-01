@@ -338,3 +338,86 @@ def test_separator_in_combined_text(tokenizer):
     assert len(parts) == 2
     assert parts[0] == "Test function."
     assert "def test" in parts[1]
+
+
+def test_filter_important_comments(tokenizer):
+    """Test that important comments (TODO, FIXME, etc.) are kept."""
+    preparator = TextPreparator(tokenizer, max_tokens=512)
+
+    code_with_comments = '''def process_data(data):
+    # TODO: add error handling
+    result = []
+    for item in data:
+        # FIXME: optimize loop
+        if item > 0:
+            result.append(item)
+    return result'''
+
+    filtered = preparator._filter_comments(code_with_comments)
+
+    # Important comments should be preserved
+    assert "TODO" in filtered
+    assert "FIXME" in filtered
+
+
+def test_filter_trivial_comments(tokenizer):
+    """Test that trivial comments without keywords are removed."""
+    preparator = TextPreparator(tokenizer, max_tokens=512)
+
+    code_with_trivial = '''def add(a, b):
+    # add two numbers
+    x = a + b  # calculate sum
+    return x  # return result'''
+
+    filtered = preparator._filter_comments(code_with_trivial)
+
+    # Trivial comments should be removed
+    assert "add two numbers" not in filtered
+    assert "calculate sum" not in filtered
+    assert "return result" not in filtered
+    # But structure should be preserved
+    assert "def add" in filtered
+    assert "return x" in filtered
+
+
+def test_keep_block_comments(tokenizer):
+    """Test that block comments are preserved."""
+    preparator = TextPreparator(tokenizer, max_tokens=512)
+
+    code_with_block = '''def complex_algorithm():
+    # This is a multi-line block comment
+    # explaining the algorithm approach
+    # and implementation details
+    result = calculate()
+    return result'''
+
+    filtered = preparator._filter_comments(code_with_block)
+
+    # Block comments should be preserved
+    assert "multi-line block comment" in filtered
+    assert "algorithm approach" in filtered
+
+
+def test_prepare_with_comment_filtering(tokenizer):
+    """Test that prepare_function applies comment filtering."""
+    preparator = TextPreparator(tokenizer, max_tokens=512)
+
+    func = Function(
+        name="process",
+        file_path="/test.py",
+        language="python",
+        source_code='''def process(x):
+    # important calculation
+    # TODO: add validation
+    result = x * 2  # double it
+    return result''',
+        docstring="Process input value.",
+        line_number=1,
+    )
+
+    prepared = preparator.prepare_function(func)
+
+    # Important comments preserved
+    assert "TODO" in prepared
+    # Trivial comments removed
+    assert "double it" not in prepared
