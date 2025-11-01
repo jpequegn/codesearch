@@ -200,3 +200,69 @@ def test_process_classes():
     assert result["summary"]["total"] == 1
     assert result["summary"]["success"] == 1
     assert "/test.py:10" in result["embeddings"]
+
+
+def test_cache_hit():
+    """Test that cached embeddings are reused."""
+    import tempfile
+
+    generator = EmbeddingGenerator()
+    preparator = TextPreparator(generator.tokenizer, max_tokens=512)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        batch_gen = BatchEmbeddingGenerator(generator, preparator, cache_dir=tmpdir)
+
+        func = Function(
+            name="test", file_path="/test.py", language="python",
+            source_code="def test(): pass",
+            docstring="Test function.", line_number=1,
+        )
+
+        # First run - should compute
+        result1 = batch_gen.process_functions([func])
+        assert result1["summary"]["newly_embedded"] == 1
+        assert result1["summary"]["cached"] == 0
+
+        # Second run - should use cache
+        batch_gen2 = BatchEmbeddingGenerator(generator, preparator, cache_dir=tmpdir)
+        result2 = batch_gen2.process_functions([func])
+        assert result2["summary"]["cached"] == 1
+        assert result2["summary"]["newly_embedded"] == 0
+
+        # Embeddings should match
+        assert result1["embeddings"]["/test.py:1"] == result2["embeddings"]["/test.py:1"]
+
+
+def test_mixed_cache_hit_miss():
+    """Test batch with both cached and new embeddings."""
+    import tempfile
+
+    generator = EmbeddingGenerator()
+    preparator = TextPreparator(generator.tokenizer, max_tokens=512)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        batch_gen = BatchEmbeddingGenerator(generator, preparator, cache_dir=tmpdir)
+
+        func1 = Function(
+            name="cached", file_path="/test.py", language="python",
+            source_code="def cached(): pass",
+            docstring="Cached.", line_number=1,
+        )
+
+        # First run
+        batch_gen.process_functions([func1])
+
+        # Second run with new function
+        func2 = Function(
+            name="new", file_path="/test.py", language="python",
+            source_code="def new(): pass",
+            docstring="New.", line_number=10,
+        )
+
+        batch_gen2 = BatchEmbeddingGenerator(generator, preparator, cache_dir=tmpdir)
+        result = batch_gen2.process_functions([func1, func2])
+
+        assert result["summary"]["total"] == 2
+        assert result["summary"]["cached"] == 1
+        assert result["summary"]["newly_embedded"] == 1
+        assert result["summary"]["success"] == 2
