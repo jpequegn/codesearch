@@ -54,11 +54,44 @@ class BatchEmbeddingGenerator:
 
     def _load_cache(self) -> None:
         """Load embeddings from disk cache into memory."""
-        pass
+        try:
+            if os.path.exists(self.cache_path):
+                with open(self.cache_path, 'r') as f:
+                    data = json.load(f)
+                self.cache = data.get('embeddings', {})
+                self.metadata = data.get('metadata', {})
+            else:
+                self.cache = {}
+                self.metadata = self._create_metadata()
+        except Exception as e:
+            # Log error, continue with empty cache
+            print(f"Warning: Failed to load cache: {e}")
+            self.cache = {}
+            self.metadata = self._create_metadata()
 
     def _save_cache(self) -> None:
         """Persist in-memory cache to disk."""
-        pass
+        try:
+            self.metadata['updated'] = datetime.utcnow().isoformat() + 'Z'
+            data = {
+                'metadata': self.metadata,
+                'embeddings': self.cache
+            }
+            os.makedirs(self.cache_dir, exist_ok=True)
+            with open(self.cache_path, 'w') as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            print(f"Error: Failed to save cache: {e}")
+
+    def _create_metadata(self) -> Dict[str, Any]:
+        """Create initial metadata."""
+        return {
+            "model_name": self.embedding_generator.model_config.name,
+            "model_version": "1.0",
+            "dimensions": self.embedding_generator.model_config.dimensions,
+            "created": datetime.utcnow().isoformat() + 'Z',
+            "updated": datetime.utcnow().isoformat() + 'Z'
+        }
 
     def _get_cache_key(self, item: Union[Function, Class]) -> str:
         """Generate unique cache key for function/class."""
