@@ -1,7 +1,10 @@
 """Tests for embedding model and generator."""
 
 import pytest
+import yaml
+import os
 from codesearch.models import EmbeddingModel
+from codesearch.embeddings.generator import EmbeddingGenerator
 
 
 def test_embedding_model_creation():
@@ -31,3 +34,214 @@ def test_embedding_model_custom_device():
     )
 
     assert model.device == "cpu"
+
+
+def test_embedding_generator_initialization():
+    """Test initializing EmbeddingGenerator with default CodeBERT model."""
+    generator = EmbeddingGenerator()
+
+    assert generator is not None
+    assert generator.model is not None
+    assert generator.tokenizer is not None
+    assert generator.device is not None
+
+
+def test_embedding_generator_with_custom_model():
+    """Test initializing EmbeddingGenerator with custom model config."""
+    model_config = EmbeddingModel(
+        name="codebert-base",
+        model_name="microsoft/codebert-base",
+        dimensions=768,
+        max_length=512,
+        device="cpu",
+    )
+
+    generator = EmbeddingGenerator(model_config)
+    assert generator.model_config == model_config
+    assert generator.device == "cpu"
+
+
+def test_embed_code_simple():
+    """Test embedding a simple code snippet."""
+    generator = EmbeddingGenerator()
+
+    code = "def hello():\n    return 'world'"
+    embedding = generator.embed_code(code)
+
+    # Should return 768-dimensional vector
+    assert isinstance(embedding, list)
+    assert len(embedding) == 768
+    # Values should be floats in roughly [-1, 1] range after normalization
+    assert all(isinstance(x, float) for x in embedding)
+
+
+def test_embed_code_consistency():
+    """Test that embedding same code twice gives same result."""
+    generator = EmbeddingGenerator()
+
+    code = "def add(a, b):\n    return a + b"
+    embedding1 = generator.embed_code(code)
+    embedding2 = generator.embed_code(code)
+
+    # Should be identical (deterministic)
+    assert embedding1 == embedding2
+
+
+def test_embed_code_different_inputs():
+    """Test that different code produces different embeddings."""
+    generator = EmbeddingGenerator()
+
+    code1 = "def add(a, b):\n    return a + b"
+    code2 = "def multiply(a, b):\n    return a * b"
+
+    embedding1 = generator.embed_code(code1)
+    embedding2 = generator.embed_code(code2)
+
+    # Should be different
+    assert embedding1 != embedding2
+
+
+def test_embed_code_empty():
+    """Test embedding empty code string."""
+    generator = EmbeddingGenerator()
+
+    embedding = generator.embed_code("")
+
+    # Should still return valid embedding
+    assert isinstance(embedding, list)
+    assert len(embedding) == 768
+
+
+def test_embed_code_long_truncation():
+    """Test that very long code gets truncated to max_length."""
+    generator = EmbeddingGenerator()
+
+    # Create code longer than max_length tokens
+    long_code = "def func():\n    " + "x = 1\n    " * 500
+
+    # Should not raise error, should truncate
+    embedding = generator.embed_code(long_code)
+    assert isinstance(embedding, list)
+    assert len(embedding) == 768
+
+
+def test_embed_batch_basic():
+    """Test batch embedding generation."""
+    generator = EmbeddingGenerator()
+
+    codes = [
+        "def add(a, b):\n    return a + b",
+        "def subtract(a, b):\n    return a - b",
+        "def multiply(a, b):\n    return a * b",
+    ]
+
+    embeddings = generator.embed_batch(codes)
+
+    # Should return list of embeddings
+    assert isinstance(embeddings, list)
+    assert len(embeddings) == 3
+    # Each embedding should be 768-dimensional
+    for emb in embeddings:
+        assert isinstance(emb, list)
+        assert len(emb) == 768
+
+
+def test_embed_batch_single_item():
+    """Test batch embedding with single item."""
+    generator = EmbeddingGenerator()
+
+    codes = ["def foo(): pass"]
+    embeddings = generator.embed_batch(codes)
+
+    assert len(embeddings) == 1
+    assert len(embeddings[0]) == 768
+
+
+def test_embed_batch_empty_list():
+    """Test batch embedding with empty list."""
+    generator = EmbeddingGenerator()
+
+    embeddings = generator.embed_batch([])
+
+    assert embeddings == []
+
+
+def test_embed_batch_consistency_with_single():
+    """Test that batch results match single embedding results."""
+    generator = EmbeddingGenerator()
+
+    code = "def hello(): return 'world'"
+
+    # Get single embedding
+    single_emb = generator.embed_code(code)
+
+    # Get batch embedding
+    batch_embs = generator.embed_batch([code])
+
+    # Should match
+    assert single_emb == batch_embs[0]
+
+
+def test_embedding_models_config_exists():
+    """Test that embedding models config file exists."""
+    config_path = "config/embedding_models.yaml"
+    assert os.path.exists(config_path), f"Config file not found: {config_path}"
+
+
+def test_embedding_models_config_valid():
+    """Test that config file is valid YAML with required fields."""
+    with open("config/embedding_models.yaml", "r") as f:
+        config = yaml.safe_load(f)
+
+    assert "models" in config
+    assert "default" in config
+    assert config["default"] in config["models"]
+
+    # Each model should have required fields
+    for model_name, model_config in config["models"].items():
+        assert "model_name" in model_config
+        assert "dimensions" in model_config
+        assert "max_length" in model_config
+
+
+def test_embedding_models_config_structure():
+    """Test that config file has proper structure for each model."""
+    with open("config/embedding_models.yaml", "r") as f:
+        config = yaml.safe_load(f)
+
+    # Check models structure
+    assert isinstance(config["models"], dict)
+    assert len(config["models"]) >= 2
+
+    # Check each model has necessary fields
+    for model_name, model_config in config["models"].items():
+        assert isinstance(model_config, dict)
+        assert "name" in model_config
+        assert "model_name" in model_config
+        assert "dimensions" in model_config
+        assert "max_length" in model_config
+        # Check types
+        assert isinstance(model_config["dimensions"], int)
+        assert isinstance(model_config["max_length"], int)
+        assert model_config["dimensions"] > 0
+        assert model_config["max_length"] > 0
+
+
+def test_embedding_models_config_device():
+    """Test that config file has valid device setting."""
+    with open("config/embedding_models.yaml", "r") as f:
+        config = yaml.safe_load(f)
+
+    assert "device" in config
+    device = config["device"]
+    assert device in ["auto", "cuda", "cpu"]
+
+
+def test_embedding_models_config_cache_dir():
+    """Test that config file has cache directory setting."""
+    with open("config/embedding_models.yaml", "r") as f:
+        config = yaml.safe_load(f)
+
+    assert "cache_dir" in config
+    assert isinstance(config["cache_dir"], str)
+    assert len(config["cache_dir"]) > 0
