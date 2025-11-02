@@ -77,8 +77,14 @@ class DataIngestionPipeline:
         # Step 3: Insert valid entities
         if valid_entities:
             try:
-                # TODO: Implement actual insertion
-                # For now, just count them
+                # Get code_entities table
+                code_entities_table = self.client.get_table("code_entities")
+
+                # Convert entities to dict format for insertion
+                entity_dicts = [self._entity_to_dict(e) for e in valid_entities]
+
+                # Insert into database
+                code_entities_table.add(entity_dicts)
                 result.inserted_count = len(valid_entities)
 
                 # Add hashes to cache for all successfully inserted entities
@@ -92,12 +98,39 @@ class DataIngestionPipeline:
                     recoverable=False,
                     timestamp=datetime.utcnow()
                 ))
+                # Mark all entities as failed
+                result.inserted_count = 0
+                result.failed_count += len(valid_entities)
 
         # Calculate duration
         duration_ms = (time.time() - start_time) * 1000
         result.duration_ms = duration_ms
 
         return result
+
+    def _entity_to_dict(self, entity: CodeEntity) -> dict:
+        """Convert CodeEntity to dictionary for database insertion.
+
+        Args:
+            entity: CodeEntity to convert
+
+        Returns:
+            Dictionary representation of entity
+        """
+        return {
+            "entity_id": entity.entity_id,
+            "name": entity.name,
+            "code_text": entity.code_text,
+            "code_vector": entity.code_vector,
+            "language": entity.language,
+            "entity_type": entity.entity_type,
+            "repository": entity.repository,
+            "file_path": entity.file_path,
+            "start_line": entity.start_line,
+            "end_line": entity.end_line,
+            "visibility": entity.visibility,
+            "source_hash": entity.source_hash,
+        }
 
     def ingest_relationships(self, relationships: List[CodeRelationship]) -> IngestionResult:
         """Ingest relationships separately if needed.

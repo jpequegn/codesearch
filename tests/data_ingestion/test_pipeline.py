@@ -165,3 +165,36 @@ def test_ingest_batch_result_summary(mock_client, valid_entity):
     summary = result.summary()
     assert "Inserted" in summary
     assert str(result.inserted_count) in summary
+
+
+def test_ingest_batch_calls_database_insert(mock_client, valid_entity):
+    """Test that ingest_batch actually calls database insert."""
+    mock_table = Mock()
+    mock_table.add = Mock(return_value=None)
+    mock_client.get_table = Mock(return_value=mock_table)
+
+    pipeline = DataIngestionPipeline(mock_client)
+    result = pipeline.ingest_batch([valid_entity])
+
+    # Verify database add() was called
+    mock_table.add.assert_called_once()
+
+    # Verify result shows insertion
+    assert result.inserted_count == 1
+
+
+def test_ingest_batch_updates_dedup_cache_on_success(mock_client, valid_entity):
+    """Test that dedup cache is updated after successful insertion."""
+    mock_table = Mock()
+    mock_table.add = Mock(return_value=None)
+    mock_client.get_table = Mock(return_value=mock_table)
+
+    pipeline = DataIngestionPipeline(mock_client)
+
+    # Entity should not be in cache initially
+    assert not pipeline.dedup_cache.is_duplicate(valid_entity)
+
+    result = pipeline.ingest_batch([valid_entity])
+
+    # After insertion, entity should be in cache
+    assert pipeline.dedup_cache.is_duplicate(valid_entity)
