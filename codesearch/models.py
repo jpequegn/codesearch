@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
 from typing import Dict, List, Optional, Set, Tuple
 
 
@@ -391,3 +392,58 @@ class EmbeddingModel:
     dimensions: int                # Vector size (e.g., 768)
     max_length: int                # Max input tokens (e.g., 512)
     device: str = "auto"           # "cpu", "cuda", or "auto"
+
+
+# Data Ingestion Models
+
+class EntityType(str, Enum):
+    """Valid entity types for code entities."""
+    function = "function"
+    class_ = "class"
+    method = "method"
+    variable = "variable"
+    module = "module"
+
+
+class Visibility(str, Enum):
+    """Visibility levels for code entities."""
+    public = "public"
+    private = "private"
+    protected = "protected"
+
+
+@dataclass
+class CodeEntity:
+    """Represents a code entity for storage in LanceDB."""
+
+    entity_id: str
+    name: str
+    code_text: str
+    code_vector: List[float]
+    language: str
+    entity_type: str
+    repository: str
+    file_path: str
+    start_line: int
+    end_line: int
+    visibility: str
+    source_hash: str
+
+
+@dataclass
+class CodeRelationship:
+    """Represents a relationship between two code entities."""
+
+    caller_id: str
+    callee_id: str
+    relationship_type: str
+
+
+@dataclass
+class SearchMetadata:
+    """Search metadata for code entities."""
+
+    metadata_id: str
+    entity_id: str
+    repository: str
+    file_path: str
