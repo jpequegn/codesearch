@@ -141,12 +141,66 @@ class DataIngestionPipeline:
         Returns:
             IngestionResult with relationship metrics
         """
-        result = IngestionResult()
-        result.batch_id = str(uuid.uuid4())
+        start_time = time.time()
+        batch_id = str(uuid.uuid4())
+        result = IngestionResult(batch_id=batch_id)
 
-        # TODO: Implement relationship ingestion
+        # Validate all relationships
+        valid_relationships = []
+        for rel in relationships:
+            validation_errors = self.validator.validate_relationship(rel)
+            if validation_errors:
+                error_msg = "; ".join(str(e.reason) for e in validation_errors)
+                result.add_error(IngestionError(
+                    entity_id=f"{rel.caller_id}->{rel.callee_id}",
+                    error_type="relationship",
+                    message=error_msg,
+                    recoverable=True,
+                    timestamp=datetime.utcnow()
+                ))
+                result.relationships_failed += 1
+            else:
+                valid_relationships.append(rel)
+
+        # Insert valid relationships
+        if valid_relationships:
+            try:
+                code_relationships_table = self.client.get_table("code_relationships")
+
+                rel_dicts = [self._relationship_to_dict(r) for r in valid_relationships]
+                code_relationships_table.add(rel_dicts)
+
+                result.relationships_inserted = len(valid_relationships)
+            except Exception as e:
+                result.add_error(IngestionError(
+                    entity_id="batch-relationships",
+                    error_type="insertion",
+                    message=f"Relationship insertion failed: {str(e)}",
+                    recoverable=False,
+                    timestamp=datetime.utcnow()
+                ))
+                result.relationships_inserted = 0
+                result.relationships_failed += len(valid_relationships)
+
+        duration_ms = (time.time() - start_time) * 1000
+        result.duration_ms = duration_ms
 
         return result
+
+    def _relationship_to_dict(self, rel: CodeRelationship) -> dict:
+        """Convert CodeRelationship to dictionary for database insertion.
+
+        Args:
+            rel: CodeRelationship to convert
+
+        Returns:
+            Dictionary representation of relationship
+        """
+        return {
+            "caller_id": rel.caller_id,
+            "callee_id": rel.callee_id,
+            "relationship_type": rel.relationship_type,
+        }
 
     def ingest_metadata(self, metadata_list: List[SearchMetadata]) -> IngestionResult:
         """Ingest metadata separately if needed.
