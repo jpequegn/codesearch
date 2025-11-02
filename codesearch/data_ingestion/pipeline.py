@@ -7,6 +7,7 @@ from codesearch.models import CodeEntity, CodeRelationship, SearchMetadata
 from codesearch.data_ingestion.models import IngestionResult, IngestionError
 from codesearch.data_ingestion.deduplication import DeduplicationCache
 from codesearch.data_ingestion.validation import IngestionValidator
+from codesearch.data_ingestion.audit import AuditTrail
 
 
 class DataIngestionPipeline:
@@ -23,6 +24,7 @@ class DataIngestionPipeline:
         self.batch_size = batch_size
         self.dedup_cache = DeduplicationCache(client)
         self.validator = IngestionValidator()
+        self.audit_trail = AuditTrail(client)
 
     def ingest_batch(self, entities: List[CodeEntity]) -> IngestionResult:
         """Ingest a batch of entities with coordinated relationships and metadata.
@@ -87,8 +89,14 @@ class DataIngestionPipeline:
                 code_entities_table.add(entity_dicts)
                 result.inserted_count = len(valid_entities)
 
-                # Add hashes to cache for all successfully inserted entities
-                for entity in valid_entities:
+                # Record audit trail for each insertion and update cache
+                for i, entity in enumerate(valid_entities):
+                    self.audit_trail.record_insert(
+                        batch_id=batch_id,
+                        entity_id=entity.entity_id,
+                        table="code_entities",
+                        new_value=entity_dicts[i]
+                    )
                     self.dedup_cache.add(entity)
             except Exception as e:
                 result.add_error(IngestionError(
@@ -276,11 +284,53 @@ class DataIngestionPipeline:
     def rollback_batch(self, batch_id: str) -> bool:
         """Rollback a previously ingested batch using audit logs.
 
+        Removes all entities, relationships, and metadata inserted in this batch.
+
         Args:
             batch_id: UUID of batch to rollback
 
         Returns:
             True if rollback successful, False otherwise
         """
-        # TODO: Implement rollback using audit trail
-        return False
+        try:
+            # Get all records for this batch
+            audit_records = self.audit_trail.get_batch_records(batch_id)
+
+            if not audit_records:
+                return False
+
+            # Group by table and operation
+            entities_to_remove = []
+            relationships_to_remove = []
+            metadata_to_remove = []
+
+            for record in audit_records:
+                if record.operation in ["insert", "update"]:
+                    if record.table == "code_entities":
+                        entities_to_remove.append(record.entity_id)
+                    elif record.table == "code_relationships":
+                        relationships_to_remove.append(record.entity_id)
+                    elif record.table == "search_metadata":
+                        metadata_to_remove.append(record.entity_id)
+
+            # Remove in reverse order (metadata → relationships → entities)
+            if metadata_to_remove:
+                metadata_table = self.client.get_table("search_metadata")
+                metadata_table.delete(f"metadata_id IN {metadata_to_remove}")
+
+            if relationships_to_remove:
+                relationships_table = self.client.get_table("code_relationships")
+                relationships_table.delete(f"caller_id IN {relationships_to_remove} OR callee_id IN {relationships_to_remove}")
+
+            if entities_to_remove:
+                entities_table = self.client.get_table("code_entities")
+                entities_table.delete(f"entity_id IN {entities_to_remove}")
+
+            # Record rollback in audit trail
+            for entity_id in entities_to_remove:
+                self.audit_trail.record_delete(batch_id, entity_id, "code_entities")
+
+            return True
+        except Exception as e:
+            # Rollback failed
+            return False
