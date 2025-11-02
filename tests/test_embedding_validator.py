@@ -511,22 +511,22 @@ def test_similarity_check_failing_pattern():
     """SimilarityCheck detects when pattern similarity is out of expected range."""
     generator = EmbeddingGenerator()
 
-    # Create custom patterns with very tight bounds that will fail
-    tight_patterns = {
+    # Create custom patterns with impossible bounds that will fail
+    impossible_patterns = {
         "impossible_match": {
             "code1": "def add(a, b):\n    return a + b",
             "code2": "def subtract(a, b):\n    return a - b",
-            "expected_similarity": (0.99, 1.00),  # Unrealistic high expectation
+            "expected_similarity": (0.0, 0.10),  # Expect low similarity, but will get ~0.99
             "reason": "Test pattern to trigger failure"
         }
     }
 
-    check = SimilarityCheck(generator, patterns=tight_patterns, tolerance=0.01)
+    check = SimilarityCheck(generator, patterns=impossible_patterns, tolerance=0.01)
     dummy_embedding = [0.5] * 768
 
     result = check.validate(dummy_embedding)
 
-    # Should fail because actual similarity won't be 0.99-1.00
+    # Should fail because actual similarity (~0.99) won't match expected (0.0-0.10)
     assert result.passed is False
     assert "Semantic checks failed" in result.message
     assert "impossible_match" in result.message
