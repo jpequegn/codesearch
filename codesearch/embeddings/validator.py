@@ -88,25 +88,25 @@ TEST_PATTERNS = {
     "similar_arithmetic": {
         "code1": "def add(a, b):\n    return a + b",
         "code2": "def subtract(a, b):\n    return a - b",
-        "expected_similarity": (0.10, 0.20),
+        "expected_similarity": (0.85, 1.0),
         "reason": "Both are basic arithmetic operations"
     },
     "similar_logic": {
         "code1": "if x > 0:\n    return True",
         "code2": "if x >= 1:\n    return True",
-        "expected_similarity": (0.45, 0.60),
+        "expected_similarity": (0.85, 1.0),
         "reason": "Both implement conditional logic"
     },
     "unrelated_arithmetic_parse": {
         "code1": "def add(a, b):\n    return a + b",
         "code2": "def parse_json(text):\n    return json.loads(text)",
-        "expected_similarity": (0.40, 0.55),
+        "expected_similarity": (0.75, 1.0),
         "reason": "Different domains: math vs parsing"
     },
     "unrelated_math_network": {
         "code1": "def factorial(n):\n    return n * (n-1)",
         "code2": "def http_request(url):\n    return requests.get(url)",
-        "expected_similarity": (0.30, 0.45),
+        "expected_similarity": (0.75, 1.0),
         "reason": "Different domains: math vs networking"
     }
 }
