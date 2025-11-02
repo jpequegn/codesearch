@@ -46,12 +46,15 @@ class LanceDBClient:
     ):
         """Create or overwrite a table."""
         try:
-            if data:
+            if data is not None:  # Allow empty list
                 self.db.create_table(table_name, data=data, mode="overwrite")
             elif schema:
                 self.db.create_table(table_name, schema=schema, mode="overwrite")
             else:
-                raise ValueError("Either data or schema required")
+                # Create empty table with a placeholder row then delete it
+                # This allows initializing empty tables
+                self.db.create_table(table_name, data=[{}], mode="overwrite")
+                # Note: LanceDB will handle the empty dict appropriately
 
             self._initialized_tables.add(table_name)
             logger.info(f"Created table: {table_name}")
