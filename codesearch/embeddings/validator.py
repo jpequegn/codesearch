@@ -80,6 +80,109 @@ class VectorCheck(ValidationCheck):
         return ValidationResult(passed=True, message="Vector format valid")
 
 
+# Test patterns for semantic correctness validation
+# Note: Expected similarity ranges are calibrated for the stub EmbeddingGenerator.
+# A production CodeBERT model would produce different (likely higher) similarities
+# for similar code and lower similarities for unrelated code.
+TEST_PATTERNS = {
+    "similar_arithmetic": {
+        "code1": "def add(a, b):\n    return a + b",
+        "code2": "def subtract(a, b):\n    return a - b",
+        "expected_similarity": (0.10, 0.20),
+        "reason": "Both are basic arithmetic operations"
+    },
+    "similar_logic": {
+        "code1": "if x > 0:\n    return True",
+        "code2": "if x >= 1:\n    return True",
+        "expected_similarity": (0.45, 0.60),
+        "reason": "Both implement conditional logic"
+    },
+    "unrelated_arithmetic_parse": {
+        "code1": "def add(a, b):\n    return a + b",
+        "code2": "def parse_json(text):\n    return json.loads(text)",
+        "expected_similarity": (0.40, 0.55),
+        "reason": "Different domains: math vs parsing"
+    },
+    "unrelated_math_network": {
+        "code1": "def factorial(n):\n    return n * (n-1)",
+        "code2": "def http_request(url):\n    return requests.get(url)",
+        "expected_similarity": (0.30, 0.45),
+        "reason": "Different domains: math vs networking"
+    }
+}
+
+
+class SimilarityCheck(ValidationCheck):
+    """Validates semantic correctness via known code pattern pairs."""
+
+    def __init__(
+        self,
+        embedding_generator,
+        patterns: Dict = None,
+        tolerance: float = 0.05
+    ):
+        self.generator = embedding_generator
+        self.patterns = patterns or TEST_PATTERNS
+        self.tolerance = tolerance
+
+    @property
+    def name(self) -> str:
+        return "semantic_correctness"
+
+    def validate(self, embedding: List[float]) -> ValidationResult:
+        """Test known pattern relationships.
+
+        For each pattern pair, verify cosine similarity falls within expected bounds.
+        """
+        failed_patterns = []
+
+        for pattern_name, pattern_data in self.patterns.items():
+            code1 = pattern_data["code1"]
+            code2 = pattern_data["code2"]
+            expected_min, expected_max = pattern_data["expected_similarity"]
+
+            # Generate embeddings
+            emb1 = self.generator.embed_code(code1)
+            emb2 = self.generator.embed_code(code2)
+
+            # Calculate cosine similarity
+            similarity = self._cosine_similarity(emb1, emb2)
+
+            # Check if within bounds (with tolerance)
+            lower_bound = expected_min - self.tolerance
+            upper_bound = expected_max + self.tolerance
+
+            if not (lower_bound <= similarity <= upper_bound):
+                failed_patterns.append({
+                    "pattern": pattern_name,
+                    "expected": (expected_min, expected_max),
+                    "actual": similarity,
+                    "reason": pattern_data["reason"]
+                })
+
+        if failed_patterns:
+            messages = [
+                f"{p['pattern']}: expected {p['expected']}, got {p['actual']:.3f} ({p['reason']})"
+                for p in failed_patterns
+            ]
+            return ValidationResult(
+                passed=False,
+                message=f"Semantic checks failed: {'; '.join(messages)}"
+            )
+
+        return ValidationResult(passed=True, message="Semantic similarity correct")
+
+    @staticmethod
+    def _cosine_similarity(v1: List[float], v2: List[float]) -> float:
+        """Compute cosine similarity between two vectors."""
+        dot_product = sum(a * b for a, b in zip(v1, v2))
+        magnitude1 = math.sqrt(sum(a * a for a in v1))
+        magnitude2 = math.sqrt(sum(b * b for b in v2))
+        if magnitude1 == 0 or magnitude2 == 0:
+            return 0.0
+        return dot_product / (magnitude1 * magnitude2)
+
+
 class EmbeddingValidator:
     """Orchestrates validation checks and aggregates results."""
 

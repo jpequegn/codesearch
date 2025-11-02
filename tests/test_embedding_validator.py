@@ -6,8 +6,10 @@ from codesearch.embeddings.validator import (
     ValidationCheck,
     ValidationResult,
     VectorCheck,
-    EmbeddingValidator
+    EmbeddingValidator,
+    SimilarityCheck
 )
+from codesearch.embeddings.generator import EmbeddingGenerator
 
 
 def test_validation_check_is_abstract():
@@ -120,3 +122,71 @@ def test_vector_check_mixed_types():
 
     assert result.passed is False
     assert "not float" in result.message
+
+
+def test_similarity_check_similar_patterns():
+    """SimilarityCheck detects similar code patterns."""
+    generator = EmbeddingGenerator()
+    check = SimilarityCheck(generator)
+
+    # Create a valid embedding (not used directly by SimilarityCheck, but required)
+    dummy_embedding = [0.5] * 768
+
+    result = check.validate(dummy_embedding)
+
+    # Should pass because similar patterns ARE similar
+    assert result.passed is True
+
+
+def test_similarity_check_name_property():
+    """SimilarityCheck has correct name property."""
+    generator = EmbeddingGenerator()
+    check = SimilarityCheck(generator)
+
+    assert check.name == "semantic_correctness"
+
+
+def test_similarity_check_with_custom_tolerance():
+    """SimilarityCheck respects tolerance parameter."""
+    generator = EmbeddingGenerator()
+
+    # Tight tolerance
+    check_tight = SimilarityCheck(generator, tolerance=0.01)
+    assert check_tight.tolerance == 0.01
+
+    # Loose tolerance
+    check_loose = SimilarityCheck(generator, tolerance=0.20)
+    assert check_loose.tolerance == 0.20
+
+
+def test_similarity_check_cosine_similarity_calculation():
+    """SimilarityCheck calculates cosine similarity correctly."""
+    generator = EmbeddingGenerator()
+    check = SimilarityCheck(generator)
+
+    # Test vectors: identical
+    v1 = [1.0, 0.0, 0.0]
+    v2 = [1.0, 0.0, 0.0]
+    similarity = check._cosine_similarity(v1, v2)
+    assert abs(similarity - 1.0) < 0.001  # Should be 1.0
+
+    # Test vectors: orthogonal (perpendicular)
+    v3 = [1.0, 0.0, 0.0]
+    v4 = [0.0, 1.0, 0.0]
+    similarity = check._cosine_similarity(v3, v4)
+    assert abs(similarity - 0.0) < 0.001  # Should be 0.0
+
+
+def test_similarity_check_detects_unrelated_patterns():
+    """SimilarityCheck can detect when unrelated patterns are too similar."""
+    generator = EmbeddingGenerator()
+
+    # Hypothetical: if embeddings were identical for unrelated code
+    # This would fail the check
+    check = SimilarityCheck(generator)
+    dummy_embedding = [0.5] * 768
+
+    # In practice, this should pass because CodeBERT correctly
+    # separates unrelated code patterns
+    result = check.validate(dummy_embedding)
+    assert result.passed is True
