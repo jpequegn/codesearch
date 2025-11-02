@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict
 import math
 
@@ -219,6 +219,24 @@ class ConsistencyCheck(ValidationCheck):
         return ValidationResult(passed=True, message="Output deterministic")
 
 
+@dataclass
+class ValidationReport:
+    """Complete validation report for an embedding."""
+    embedding_valid: bool  # Overall pass/fail
+    timestamp: str
+    checks_passed: List[str]  # Names of passing checks
+    checks_failed: List[str]  # Names of failing checks
+    messages: Dict[str, str]  # Detailed message per check
+
+    def summary(self) -> str:
+        """Human-readable summary."""
+        if self.embedding_valid:
+            return f"✓ All {len(self.checks_passed)} checks passed"
+        else:
+            total = len(self.checks_passed) + len(self.checks_failed)
+            return f"✗ {len(self.checks_failed)} of {total} checks failed"
+
+
 class EmbeddingValidator:
     """Orchestrates validation checks and aggregates results."""
 
@@ -233,17 +251,44 @@ class EmbeddingValidator:
         """
         self.checks.append(check)
 
-    def validate(self, embedding: List[float]) -> Dict[str, bool]:
+    def validate(self, embedding: List[float]) -> ValidationReport:
         """Run all registered checks on an embedding.
 
         Args:
             embedding: 768-dimensional embedding vector
 
         Returns:
-            Dictionary with validation results
+            ValidationReport with pass/fail status and detailed results
         """
-        results = {}
+        passed_checks = []
+        failed_checks = []
+        messages = {}
+
         for check in self.checks:
             result = check.validate(embedding)
-            results[check.name] = result.passed
-        return results
+            check_name = check.name
+
+            if result.passed:
+                passed_checks.append(check_name)
+            else:
+                failed_checks.append(check_name)
+                messages[check_name] = result.message
+
+        return ValidationReport(
+            embedding_valid=len(failed_checks) == 0,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            checks_passed=passed_checks,
+            checks_failed=failed_checks,
+            messages=messages
+        )
+
+    def validate_batch(self, embeddings: List[List[float]]) -> List[ValidationReport]:
+        """Validate multiple embeddings.
+
+        Args:
+            embeddings: List of 768-dimensional vectors
+
+        Returns:
+            List of ValidationReport, one per embedding
+        """
+        return [self.validate(emb) for emb in embeddings]

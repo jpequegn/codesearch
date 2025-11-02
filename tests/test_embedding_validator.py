@@ -8,7 +8,8 @@ from codesearch.embeddings.validator import (
     VectorCheck,
     EmbeddingValidator,
     SimilarityCheck,
-    ConsistencyCheck
+    ConsistencyCheck,
+    ValidationReport
 )
 from codesearch.embeddings.generator import EmbeddingGenerator
 
@@ -222,3 +223,108 @@ def test_consistency_check_configurable_runs():
 
     check_5_runs = ConsistencyCheck(generator, runs=5)
     assert check_5_runs.runs == 5
+
+
+def test_embedding_validator_initialization():
+    """EmbeddingValidator starts with no checks registered."""
+    validator = EmbeddingValidator()
+
+    assert len(validator.checks) == 0
+
+
+def test_embedding_validator_register_check():
+    """EmbeddingValidator can register checks."""
+    validator = EmbeddingValidator()
+    check = VectorCheck()
+
+    validator.register_check(check)
+
+    assert len(validator.checks) == 1
+    assert validator.checks[0] == check
+
+
+def test_embedding_validator_single_check_pass():
+    """EmbeddingValidator returns passing report when all checks pass."""
+    validator = EmbeddingValidator()
+    check = VectorCheck()
+    validator.register_check(check)
+
+    valid_embedding = [0.5] * 768
+    report = validator.validate(valid_embedding)
+
+    assert report.embedding_valid is True
+    assert len(report.checks_passed) == 1
+    assert len(report.checks_failed) == 0
+
+
+def test_embedding_validator_single_check_fail():
+    """EmbeddingValidator returns failing report when check fails."""
+    validator = EmbeddingValidator()
+    check = VectorCheck()
+    validator.register_check(check)
+
+    invalid_embedding = [0.5] * 512  # Wrong dimensions
+    report = validator.validate(invalid_embedding)
+
+    assert report.embedding_valid is False
+    assert len(report.checks_passed) == 0
+    assert len(report.checks_failed) == 1
+    assert "vector_format" in report.checks_failed
+
+
+def test_embedding_validator_multiple_checks_mixed():
+    """EmbeddingValidator aggregates results from multiple checks."""
+    generator = EmbeddingGenerator()
+    validator = EmbeddingValidator()
+
+    validator.register_check(VectorCheck())
+    validator.register_check(SimilarityCheck(generator))
+    validator.register_check(ConsistencyCheck(generator))
+
+    valid_embedding = [0.5] * 768
+    report = validator.validate(valid_embedding)
+
+    # All checks should pass for valid embedding
+    assert report.embedding_valid is True
+    assert len(report.checks_passed) >= 1
+
+
+def test_embedding_validator_validation_report():
+    """ValidationReport provides human-readable summary."""
+    report = ValidationReport(
+        embedding_valid=True,
+        timestamp="2025-11-01T12:00:00",
+        checks_passed=["vector_format", "semantic_correctness"],
+        checks_failed=[],
+        messages={}
+    )
+
+    summary = report.summary()
+    assert "All" in summary
+    assert "checks passed" in summary
+
+
+def test_embedding_validator_batch_validation():
+    """EmbeddingValidator can validate multiple embeddings."""
+    validator = EmbeddingValidator()
+    validator.register_check(VectorCheck())
+
+    embeddings = [[0.5] * 768, [0.7] * 768, [0.3] * 768]
+    reports = validator.validate_batch(embeddings)
+
+    assert len(reports) == 3
+    assert all(r.embedding_valid for r in reports)
+
+
+def test_embedding_validator_failed_check_message_included():
+    """ValidationReport includes messages from failed checks."""
+    validator = EmbeddingValidator()
+    validator.register_check(VectorCheck())
+
+    invalid_embedding = [0.5] * 512  # Wrong dimensions
+    report = validator.validate(invalid_embedding)
+
+    assert report.embedding_valid is False
+    assert len(report.messages) > 0
+    assert "vector_format" in report.messages
+    assert "Expected 768 dims" in report.messages["vector_format"]

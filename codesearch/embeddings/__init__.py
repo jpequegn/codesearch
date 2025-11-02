@@ -5,7 +5,8 @@ from codesearch.embeddings.validator import (
     ValidationResult,
     VectorCheck,
     SimilarityCheck,
-    EmbeddingValidator
+    EmbeddingValidator,
+    ValidationReport
 )
 
 __all__ = [
@@ -13,5 +14,6 @@ __all__ = [
     "ValidationResult",
     "VectorCheck",
     "SimilarityCheck",
-    "EmbeddingValidator"
+    "EmbeddingValidator",
+    "ValidationReport"
 ]
