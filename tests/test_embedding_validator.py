@@ -7,7 +7,8 @@ from codesearch.embeddings.validator import (
     ValidationResult,
     VectorCheck,
     EmbeddingValidator,
-    SimilarityCheck
+    SimilarityCheck,
+    ConsistencyCheck
 )
 from codesearch.embeddings.generator import EmbeddingGenerator
 
@@ -190,3 +191,34 @@ def test_similarity_check_detects_unrelated_patterns():
     # separates unrelated code patterns
     result = check.validate(dummy_embedding)
     assert result.passed is True
+
+
+def test_consistency_check_deterministic():
+    """ConsistencyCheck validates deterministic embedding output."""
+    generator = EmbeddingGenerator()
+    check = ConsistencyCheck(generator, runs=3)
+
+    dummy_embedding = [0.5] * 768
+    result = check.validate(dummy_embedding)
+
+    # Should pass because CodeBERT is deterministic
+    assert result.passed is True
+
+
+def test_consistency_check_name_property():
+    """ConsistencyCheck has correct name property."""
+    generator = EmbeddingGenerator()
+    check = ConsistencyCheck(generator)
+
+    assert check.name == "deterministic_output"
+
+
+def test_consistency_check_configurable_runs():
+    """ConsistencyCheck respects runs parameter."""
+    generator = EmbeddingGenerator()
+
+    check_3_runs = ConsistencyCheck(generator, runs=3)
+    assert check_3_runs.runs == 3
+
+    check_5_runs = ConsistencyCheck(generator, runs=5)
+    assert check_5_runs.runs == 5

@@ -183,6 +183,42 @@ class SimilarityCheck(ValidationCheck):
         return dot_product / (magnitude1 * magnitude2)
 
 
+class ConsistencyCheck(ValidationCheck):
+    """Validates that embeddings are deterministic across runs."""
+
+    def __init__(self, embedding_generator, runs: int = 3):
+        self.generator = embedding_generator
+        self.runs = runs
+
+    @property
+    def name(self) -> str:
+        return "deterministic_output"
+
+    def validate(self, embedding: List[float]) -> ValidationResult:
+        """Test determinism by re-embedding test code multiple times."""
+        test_code = """def fibonacci(n):
+    if n <= 1:
+        return n
+    return fibonacci(n-1) + fibonacci(n-2)"""
+
+        # Embed same code multiple times
+        embeddings = [self.generator.embed_code(test_code) for _ in range(self.runs)]
+
+        # All embeddings must be identical
+        first_embedding = embeddings[0]
+
+        for i, emb in enumerate(embeddings[1:], 1):
+            if emb != first_embedding:
+                # Check how different they are
+                diff_count = sum(1 for a, b in zip(first_embedding, emb) if a != b)
+                return ValidationResult(
+                    passed=False,
+                    message=f"Run {i} differs: {diff_count}/{len(emb)} elements changed"
+                )
+
+        return ValidationResult(passed=True, message="Output deterministic")
+
+
 class EmbeddingValidator:
     """Orchestrates validation checks and aggregates results."""
 
