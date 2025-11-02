@@ -328,3 +328,238 @@ def test_embedding_validator_failed_check_message_included():
     assert len(report.messages) > 0
     assert "vector_format" in report.messages
     assert "Expected 768 dims" in report.messages["vector_format"]
+
+
+# Edge case and integration tests (Task 5)
+
+def test_vector_check_empty_embedding():
+    """VectorCheck rejects empty embedding."""
+    check = VectorCheck()
+
+    empty_embedding = []
+    result = check.validate(empty_embedding)
+
+    assert result.passed is False
+    assert "Expected 768 dims" in result.message
+
+
+def test_similarity_check_empty_patterns():
+    """SimilarityCheck handles empty patterns gracefully."""
+    generator = EmbeddingGenerator()
+    check = SimilarityCheck(generator, patterns={})
+
+    dummy_embedding = [0.5] * 768
+    result = check.validate(dummy_embedding)
+
+    # With no patterns to check, should pass
+    assert result.passed is True
+
+
+def test_consistency_check_single_run():
+    """ConsistencyCheck works with single run (no comparison needed)."""
+    generator = EmbeddingGenerator()
+    check = ConsistencyCheck(generator, runs=1)
+
+    dummy_embedding = [0.5] * 768
+    result = check.validate(dummy_embedding)
+
+    assert result.passed is True
+
+
+def test_validator_registers_multiple_checks():
+    """EmbeddingValidator can register multiple distinct checks."""
+    generator = EmbeddingGenerator()
+    validator = EmbeddingValidator()
+
+    validator.register_check(VectorCheck())
+    validator.register_check(SimilarityCheck(generator))
+    validator.register_check(ConsistencyCheck(generator))
+
+    assert len(validator.checks) == 3
+
+
+def test_validator_check_order_preserved():
+    """EmbeddingValidator runs checks in registration order."""
+    validator = EmbeddingValidator()
+
+    check1 = VectorCheck()
+    check2 = SimilarityCheck(EmbeddingGenerator())
+
+    validator.register_check(check1)
+    validator.register_check(check2)
+
+    assert validator.checks[0].name == "vector_format"
+    assert validator.checks[1].name == "semantic_correctness"
+
+
+def test_validation_report_timestamp_format():
+    """ValidationReport timestamp is ISO format."""
+    validator = EmbeddingValidator()
+    validator.register_check(VectorCheck())
+
+    valid_embedding = [0.5] * 768
+    report = validator.validate(valid_embedding)
+
+    # Should be ISO format
+    assert "T" in report.timestamp
+    # Check for UTC timezone indicator (either Z or +00:00)
+    assert report.timestamp.endswith("Z") or report.timestamp.endswith("+00:00") or "-" in report.timestamp[-6:]
+
+
+def test_vector_check_all_elements_float():
+    """VectorCheck validates all elements are float type."""
+    check = VectorCheck()
+
+    # Mix of float and int (int could be valid in Python but we check strict types)
+    mixed_embedding = [0.5] * 767 + [1]  # Last element is int
+
+    result = check.validate(mixed_embedding)
+
+    # Should fail because last element is int, not float
+    # Note: In practice, Python might coerce int to float, so this tests strict typing
+    # You may need to adjust based on actual behavior
+    if not isinstance(mixed_embedding[-1], float):
+        assert result.passed is False
+
+
+def test_validator_report_different_failure_messages():
+    """Each failed check has distinct message in report."""
+    validator = EmbeddingValidator()
+
+    # Add VectorCheck that will fail
+    validator.register_check(VectorCheck())
+
+    wrong_dims = [0.5] * 512
+    report = validator.validate(wrong_dims)
+
+    assert "vector_format" in report.messages
+    assert "Expected 768" in report.messages["vector_format"]
+
+
+def test_similarity_check_vector_normalization():
+    """SimilarityCheck cosine_similarity handles normalization."""
+    generator = EmbeddingGenerator()
+    check = SimilarityCheck(generator)
+
+    # Zero vectors
+    zero_v1 = [0.0, 0.0, 0.0]
+    zero_v2 = [0.0, 0.0, 0.0]
+
+    similarity = check._cosine_similarity(zero_v1, zero_v2)
+
+    # Should handle gracefully (return 0 or handle zero division)
+    assert isinstance(similarity, float)
+    assert 0.0 <= similarity <= 1.0
+
+
+def test_consistency_check_different_test_codes():
+    """ConsistencyCheck uses deterministic test code."""
+    generator = EmbeddingGenerator()
+    check1 = ConsistencyCheck(generator)
+    check2 = ConsistencyCheck(generator)
+
+    dummy_embedding = [0.5] * 768
+    result1 = check1.validate(dummy_embedding)
+    result2 = check2.validate(dummy_embedding)
+
+    # Both should pass independently
+    assert result1.passed is True
+    assert result2.passed is True
+
+
+def test_validator_full_integration_pipeline():
+    """Full validation pipeline with all checks works end-to-end."""
+    generator = EmbeddingGenerator()
+    validator = EmbeddingValidator()
+
+    # Register all checks
+    validator.register_check(VectorCheck())
+    validator.register_check(SimilarityCheck(generator))
+    validator.register_check(ConsistencyCheck(generator))
+
+    # Validate a real embedding from EmbeddingGenerator
+    code = "def hello(): return 'world'"
+    embedding = generator.embed_code(code)
+
+    report = validator.validate(embedding)
+
+    # Should have 3 checks attempted
+    assert len(report.checks_passed) + len(report.checks_failed) == 3
+    # Should pass all checks
+    assert report.embedding_valid is True
+    assert len(report.checks_failed) == 0
+
+
+def test_batch_validation_with_mixed_validity():
+    """Batch validation handles valid and invalid embeddings."""
+    validator = EmbeddingValidator()
+    validator.register_check(VectorCheck())
+
+    valid_embedding = [0.5] * 768
+    invalid_embedding = [0.5] * 512  # Wrong dimensions
+
+    embeddings = [valid_embedding, invalid_embedding, valid_embedding]
+    reports = validator.validate_batch(embeddings)
+
+    assert len(reports) == 3
+    assert reports[0].embedding_valid is True
+    assert reports[1].embedding_valid is False
+    assert reports[2].embedding_valid is True
+
+
+def test_similarity_check_failing_pattern():
+    """SimilarityCheck detects when pattern similarity is out of expected range."""
+    generator = EmbeddingGenerator()
+
+    # Create custom patterns with very tight bounds that will fail
+    tight_patterns = {
+        "impossible_match": {
+            "code1": "def add(a, b):\n    return a + b",
+            "code2": "def subtract(a, b):\n    return a - b",
+            "expected_similarity": (0.99, 1.00),  # Unrealistic high expectation
+            "reason": "Test pattern to trigger failure"
+        }
+    }
+
+    check = SimilarityCheck(generator, patterns=tight_patterns, tolerance=0.01)
+    dummy_embedding = [0.5] * 768
+
+    result = check.validate(dummy_embedding)
+
+    # Should fail because actual similarity won't be 0.99-1.00
+    assert result.passed is False
+    assert "Semantic checks failed" in result.message
+    assert "impossible_match" in result.message
+
+
+def test_consistency_check_non_deterministic_detection():
+    """ConsistencyCheck can detect non-deterministic behavior (if it existed)."""
+    # Note: EmbeddingGenerator is deterministic, so this tests the detection logic
+    # by verifying the check works correctly with deterministic input
+    generator = EmbeddingGenerator()
+    check = ConsistencyCheck(generator, runs=5)
+
+    dummy_embedding = [0.5] * 768
+    result = check.validate(dummy_embedding)
+
+    # Should pass with more runs
+    assert result.passed is True
+    assert "deterministic" in result.message
+
+
+def test_validation_report_summary_with_failures():
+    """ValidationReport summary method handles failures correctly."""
+    report = ValidationReport(
+        embedding_valid=False,
+        timestamp="2025-11-01T12:00:00",
+        checks_passed=["vector_format"],
+        checks_failed=["semantic_correctness", "deterministic_output"],
+        messages={
+            "semantic_correctness": "Pattern mismatch",
+            "deterministic_output": "Non-deterministic output detected"
+        }
+    )
+
+    summary = report.summary()
+    assert "2 of 3 checks failed" in summary
+    assert "✗" in summary
