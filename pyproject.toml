@@ -21,6 +21,8 @@ dependencies = [
     "tree-sitter>=0.20.0",
     "pydantic>=2.0.0",
     "python-dotenv>=1.0.0",
+    "typer[all]==0.9.0",
+    "rich==13.7.0",
 ]
 
 [project.optional-dependencies]
@@ -34,7 +36,7 @@ dev = [
 ]
 
 [project.scripts]
-codesearch = "codesearch.cli:main"
+codesearch = "codesearch.cli.main:app"
 
 [tool.black]
 line-length = 100
