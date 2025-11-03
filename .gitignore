@@ -139,3 +139,6 @@ dmypy.json
 # Project specific
 indexed_repos.json
 cache/
+
+# Git worktrees
+.worktrees/
