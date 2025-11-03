@@ -1,0 +1,439 @@
+"""Tests for batch embedding generator."""
+
+import pytest
+from codesearch.models import Function, Class
+from codesearch.embeddings.generator import EmbeddingGenerator
+from codesearch.embeddings.text_preparator import TextPreparator
+from codesearch.embeddings.batch_generator import BatchEmbeddingGenerator
+
+
+def test_batch_generator_initialization():
+    """Test creating a BatchEmbeddingGenerator."""
+    generator = EmbeddingGenerator()
+    preparator = TextPreparator(generator.tokenizer, max_tokens=512)
+    batch_gen = BatchEmbeddingGenerator(generator, preparator)
+
+    assert batch_gen is not None
+    assert batch_gen.embedding_generator is not None
+    assert batch_gen.text_preparator is not None
+    assert isinstance(batch_gen.cache, dict)
+
+
+def test_batch_generator_has_required_methods():
+    """Test that BatchEmbeddingGenerator has all required methods."""
+    generator = EmbeddingGenerator()
+    preparator = TextPreparator(generator.tokenizer, max_tokens=512)
+    batch_gen = BatchEmbeddingGenerator(generator, preparator)
+
+    # Verify all methods exist
+    assert hasattr(batch_gen, 'process_functions')
+    assert hasattr(batch_gen, 'process_classes')
+    assert hasattr(batch_gen, 'process_batch')
+    assert hasattr(batch_gen, '_load_cache')
+    assert hasattr(batch_gen, '_save_cache')
+    assert hasattr(batch_gen, '_get_cache_key')
+
+
+def test_load_cache_creates_metadata():
+    """Test that _load_cache initializes metadata."""
+    generator = EmbeddingGenerator()
+    preparator = TextPreparator(generator.tokenizer, max_tokens=512)
+    batch_gen = BatchEmbeddingGenerator(generator, preparator)
+
+    batch_gen._load_cache()
+
+    # Should have metadata even if cache file doesn't exist
+    assert batch_gen.metadata is not None
+    assert isinstance(batch_gen.metadata, dict)
+
+
+def test_save_cache_creates_file():
+    """Test that _save_cache persists cache to disk."""
+    import tempfile
+    import json
+    import os
+
+    generator = EmbeddingGenerator()
+    preparator = TextPreparator(generator.tokenizer, max_tokens=512)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        batch_gen = BatchEmbeddingGenerator(
+            generator, preparator,
+            cache_dir=tmpdir
+        )
+
+        # Add something to cache
+        batch_gen.cache["/test.py:1"] = {
+            "name": "test_func",
+            "embedding": [0.1, 0.2, 0.3],
+            "timestamp": "2025-11-01T00:00:00Z",
+            "model_version": "1.0"
+        }
+        batch_gen.metadata = {
+            "model_name": "codebert-base",
+            "model_version": "1.0"
+        }
+
+        batch_gen._save_cache()
+
+        # Verify file exists
+        assert os.path.exists(batch_gen.cache_path)
+
+        # Verify file contains expected data
+        with open(batch_gen.cache_path, 'r') as f:
+            data = json.load(f)
+
+        assert "embeddings" in data
+        assert "/test.py:1" in data["embeddings"]
+
+
+def test_load_existing_cache():
+    """Test that _load_cache reads existing cache file."""
+    import tempfile
+    import json
+    import os
+
+    generator = EmbeddingGenerator()
+    preparator = TextPreparator(generator.tokenizer, max_tokens=512)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create cache file
+        cache_path = os.path.join(tmpdir, "cache.json")
+        cache_data = {
+            "metadata": {
+                "model_name": "codebert-base",
+                "model_version": "1.0"
+            },
+            "embeddings": {
+                "/existing.py:10": {
+                    "name": "existing_func",
+                    "embedding": [0.5, 0.6, 0.7],
+                    "timestamp": "2025-11-01T00:00:00Z",
+                    "model_version": "1.0"
+                }
+            }
+        }
+
+        with open(cache_path, 'w') as f:
+            json.dump(cache_data, f)
+
+        batch_gen = BatchEmbeddingGenerator(
+            generator, preparator,
+            cache_dir=tmpdir
+        )
+
+        batch_gen._load_cache()
+
+        # Verify cache loaded
+        assert "/existing.py:10" in batch_gen.cache
+        assert batch_gen.cache["/existing.py:10"]["name"] == "existing_func"
+
+
+def test_process_single_function():
+    """Test processing a single function."""
+    generator = EmbeddingGenerator()
+    preparator = TextPreparator(generator.tokenizer, max_tokens=512)
+    batch_gen = BatchEmbeddingGenerator(generator, preparator)
+
+    func = Function(
+        name="add",
+        file_path="/test.py",
+        language="python",
+        source_code="def add(a, b):\n    return a + b",
+        docstring="Add two numbers.",
+        line_number=1,
+    )
+
+    result = batch_gen.process_functions([func])
+
+    # Should return dict with summary and embeddings
+    assert "summary" in result
+    assert "embeddings" in result
+    assert result["summary"]["total"] == 1
+    assert result["summary"]["success"] == 1
+    assert "/test.py:1" in result["embeddings"]
+
+
+def test_process_multiple_functions():
+    """Test processing multiple functions."""
+    generator = EmbeddingGenerator()
+    preparator = TextPreparator(generator.tokenizer, max_tokens=512)
+    batch_gen = BatchEmbeddingGenerator(generator, preparator)
+
+    functions = [
+        Function(
+            name="add", file_path="/test.py", language="python",
+            source_code="def add(a, b):\n    return a + b",
+            docstring="Add numbers.", line_number=1,
+        ),
+        Function(
+            name="sub", file_path="/test.py", language="python",
+            source_code="def sub(a, b):\n    return a - b",
+            docstring="Subtract numbers.", line_number=5,
+        ),
+    ]
+
+    result = batch_gen.process_functions(functions)
+
+    assert result["summary"]["total"] == 2
+    assert result["summary"]["success"] == 2
+    assert len(result["embeddings"]) == 2
+
+
+def test_process_classes():
+    """Test processing classes."""
+    generator = EmbeddingGenerator()
+    preparator = TextPreparator(generator.tokenizer, max_tokens=512)
+    batch_gen = BatchEmbeddingGenerator(generator, preparator)
+
+    cls = Class(
+        name="Calculator",
+        file_path="/test.py",
+        language="python",
+        source_code="class Calculator:\n    pass",
+        docstring="A calculator class.",
+        line_number=10,
+    )
+
+    result = batch_gen.process_classes([cls])
+
+    assert result["summary"]["total"] == 1
+    assert result["summary"]["success"] == 1
+    assert "/test.py:10" in result["embeddings"]
+
+
+def test_cache_hit():
+    """Test that cached embeddings are reused."""
+    import tempfile
+
+    generator = EmbeddingGenerator()
+    preparator = TextPreparator(generator.tokenizer, max_tokens=512)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        batch_gen = BatchEmbeddingGenerator(generator, preparator, cache_dir=tmpdir)
+
+        func = Function(
+            name="test", file_path="/test.py", language="python",
+            source_code="def test(): pass",
+            docstring="Test function.", line_number=1,
+        )
+
+        # First run - should compute
+        result1 = batch_gen.process_functions([func])
+        assert result1["summary"]["newly_embedded"] == 1
+        assert result1["summary"]["cached"] == 0
+
+        # Second run - should use cache
+        batch_gen2 = BatchEmbeddingGenerator(generator, preparator, cache_dir=tmpdir)
+        result2 = batch_gen2.process_functions([func])
+        assert result2["summary"]["cached"] == 1
+        assert result2["summary"]["newly_embedded"] == 0
+
+        # Embeddings should match
+        assert result1["embeddings"]["/test.py:1"] == result2["embeddings"]["/test.py:1"]
+
+
+def test_mixed_cache_hit_miss():
+    """Test batch with both cached and new embeddings."""
+    import tempfile
+
+    generator = EmbeddingGenerator()
+    preparator = TextPreparator(generator.tokenizer, max_tokens=512)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        batch_gen = BatchEmbeddingGenerator(generator, preparator, cache_dir=tmpdir)
+
+        func1 = Function(
+            name="cached", file_path="/test.py", language="python",
+            source_code="def cached(): pass",
+            docstring="Cached.", line_number=1,
+        )
+
+        # First run
+        batch_gen.process_functions([func1])
+
+        # Second run with new function
+        func2 = Function(
+            name="new", file_path="/test.py", language="python",
+            source_code="def new(): pass",
+            docstring="New.", line_number=10,
+        )
+
+        batch_gen2 = BatchEmbeddingGenerator(generator, preparator, cache_dir=tmpdir)
+        result = batch_gen2.process_functions([func1, func2])
+
+        assert result["summary"]["total"] == 2
+        assert result["summary"]["cached"] == 1
+        assert result["summary"]["newly_embedded"] == 1
+        assert result["summary"]["success"] == 2
+
+
+def test_batch_continues_on_error():
+    """Test that batch processing continues when one item fails."""
+    generator = EmbeddingGenerator()
+    preparator = TextPreparator(generator.tokenizer, max_tokens=512)
+    batch_gen = BatchEmbeddingGenerator(generator, preparator)
+
+    # Create function with invalid docstring that would cause issues
+    functions = [
+        Function(
+            name="good", file_path="/test.py", language="python",
+            source_code="def good(): return 1",
+            docstring="Good function.", line_number=1,
+        ),
+        # This should fail or be handled gracefully
+        Function(
+            name="empty", file_path="/test.py", language="python",
+            source_code="",  # Empty code
+            docstring=None, line_number=5,
+        ),
+        Function(
+            name="also_good", file_path="/test.py", language="python",
+            source_code="def also_good(): return 2",
+            docstring="Also good.", line_number=10,
+        ),
+    ]
+
+    result = batch_gen.process_functions(functions)
+
+    # Should have processed 3, succeeded on at least 2
+    assert result["summary"]["total"] == 3
+    assert result["summary"]["success"] >= 2
+    # Batch should not crash
+    assert "summary" in result
+
+
+def test_empty_batch():
+    """Test processing empty batch."""
+    generator = EmbeddingGenerator()
+    preparator = TextPreparator(generator.tokenizer, max_tokens=512)
+    batch_gen = BatchEmbeddingGenerator(generator, preparator)
+
+    result = batch_gen.process_functions([])
+
+    assert result["summary"]["total"] == 0
+    assert result["summary"]["success"] == 0
+    assert len(result["embeddings"]) == 0
+
+
+def test_integration_with_full_pipeline():
+    """Test complete pipeline: Parser → TextPreparator → BatchEmbeddingGenerator."""
+    generator = EmbeddingGenerator()
+    preparator = TextPreparator(generator.tokenizer, max_tokens=512)
+    batch_gen = BatchEmbeddingGenerator(generator, preparator)
+
+    functions = [
+        Function(
+            name="calculate",
+            file_path="/math.py",
+            language="python",
+            source_code="def calculate(a, b):\n    # TODO: add more operations\n    return a + b",
+            docstring="Calculate sum of two numbers.",
+            line_number=1,
+        ),
+        Function(
+            name="process",
+            file_path="/math.py",
+            language="python",
+            source_code="def process(data):\n    # important comment\n    return sum(data)",
+            docstring="Process data list.",
+            line_number=10,
+        ),
+    ]
+
+    result = batch_gen.process_functions(functions)
+
+    # Verify full pipeline worked
+    assert result["summary"]["success"] == 2
+    assert len(result["embeddings"]) == 2
+
+    # Verify embeddings are valid
+    for key, embedding in result["embeddings"].items():
+        assert embedding is not None
+        assert isinstance(embedding, list)
+        assert len(embedding) == 768
+
+
+def test_integration_end_to_end_with_real_models():
+    """Test end-to-end with real EmbeddingGenerator and TextPreparator."""
+    generator = EmbeddingGenerator()
+    preparator = TextPreparator(generator.tokenizer, max_tokens=512)
+    batch_gen = BatchEmbeddingGenerator(generator, preparator)
+
+    # Create realistic functions
+    functions = [
+        Function(
+            name="validate_input",
+            file_path="/validators.py",
+            language="python",
+            source_code="""def validate_input(data):
+    # TODO: add type checking
+    if not data:
+        raise ValueError("Empty data")
+    return True""",
+            docstring="Validate input data before processing.",
+            line_number=1,
+        ),
+        Function(
+            name="transform_data",
+            file_path="/validators.py",
+            language="python",
+            source_code="""def transform_data(items):
+    \"\"\"Transform items into output format.\"\"\"
+    return [item.upper() for item in items]""",
+            docstring="Transform items to uppercase.",
+            line_number=10,
+        ),
+    ]
+
+    result = batch_gen.process_functions(functions)
+
+    # All should succeed
+    assert result["summary"]["total"] == 2
+    assert result["summary"]["success"] == 2
+    assert result["summary"]["failed"] == 0
+
+    # Verify embeddings are distinct
+    emb1 = result["embeddings"]["/validators.py:1"]
+    emb2 = result["embeddings"]["/validators.py:10"]
+    assert emb1 != emb2
+
+
+def test_real_codebase_p3_validation():
+    """Validate batch embedding on real P3 codebase."""
+    from pathlib import Path
+    from codesearch.parsers.python_parser import PythonParser
+
+    generator = EmbeddingGenerator()
+    preparator = TextPreparator(generator.tokenizer, max_tokens=512)
+    batch_gen = BatchEmbeddingGenerator(generator, preparator)
+    parser = PythonParser()
+
+    # Test on P3 codebase
+    p3_path = Path("/Users/julienpequegnot/Code/parakeet-podcast-processor/src")
+
+    if not p3_path.exists():
+        pytest.skip("P3 codebase not available for testing")
+
+    python_files = list(p3_path.rglob("*.py"))
+    assert len(python_files) > 0, "No Python files found in P3"
+
+    total_functions = 0
+    total_embedded = 0
+
+    for py_file in python_files[:10]:  # Test first 10 files
+        try:
+            functions, classes = parser.parse(str(py_file))
+            total_functions += len(functions)
+
+            result = batch_gen.process_functions(functions)
+            total_embedded += result["summary"]["success"]
+        except Exception as e:
+            print(f"Warning: Failed to process {py_file}: {e}")
+
+    # Verify reasonable success
+    assert total_functions > 0
+    assert total_embedded > 0
+    assert total_embedded >= total_functions * 0.8  # At least 80% success
+
+    print(f"\nP3 Validation: {total_functions} functions, {total_embedded} embedded")
