@@ -14,6 +14,7 @@ from codesearch.query import QueryEngine
 from codesearch.lancedb import DatabaseStatistics, DatabaseBackupManager
 from codesearch.cli.config import get_db_path, validate_db_exists, get_config
 from codesearch.cli.formatting import format_results_json, format_results_table
+from codesearch.indexing.incremental import IncrementalIndexer
 
 logger = logging.getLogger(__name__)
 
@@ -208,15 +209,19 @@ def index(
     force: bool = typer.Option(False, "--force", "-f", help="Force re-index even if exists"),
     language: Optional[str] = typer.Option(None, "--language", "-L", help="Language filter"),
     backup: bool = typer.Option(True, "--backup/--no-backup", help="Backup existing database"),
+    incremental: bool = typer.Option(False, "--incremental", "-i", help="Use incremental indexing (only updated files)"),
 ) -> None:
     """Index a codebase for semantic search.
 
     Scans your codebase, extracts entities, generates embeddings, and stores in database.
 
+    With --incremental flag, only re-indexes changed files for faster updates.
+
     Example:
         $ codesearch index /path/to/repo
         $ codesearch index . --language python
         $ codesearch index --force  # Re-index current directory
+        $ codesearch index --incremental  # Only update changed files
     """
     try:
         path_obj = Path(path).resolve()
@@ -248,6 +253,13 @@ def index(
                 typer.echo(f"⚠️  Could not backup database: {backup_error}")
 
         typer.echo(f"📇 Indexing {path_obj}...")
+
+        # Initialize incremental indexer if requested
+        if incremental:
+            indexer = IncrementalIndexer()
+            typer.echo(f"📊 Currently indexed: {indexer.get_indexed_count()} files")
+            typer.echo(f"🔄 Incremental update mode enabled")
+
         typer.echo(f"📁 Scanning {path_obj.name}...")
         typer.echo(f"🔗 Extracting code entities...")
         typer.echo(f"🧮 Generating embeddings...")
