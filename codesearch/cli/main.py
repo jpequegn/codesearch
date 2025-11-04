@@ -10,6 +10,9 @@ from codesearch import __version__
 from codesearch.cli.commands import (
     pattern, find_similar, dependencies, index, refactor_dupes, list_functions
 )
+from codesearch.cli.interactive import (
+    detail, context, compare, config_show, config_init
+)
 
 
 def version_callback(value: bool) -> None:
@@ -63,6 +66,13 @@ app.command(name="deps")(dependencies)
 app.command(name="index")(index)
 app.command(name="refactor-dupes")(refactor_dupes)
 app.command(name="list-functions")(list_functions)
+
+# Register interactive commands
+app.command(name="detail")(detail)
+app.command(name="context")(context)
+app.command(name="compare")(compare)
+app.command(name="config-show")(config_show)
+app.command(name="config-init")(config_init)
 
 
 def run() -> None:
