@@ -7,7 +7,9 @@ Supports semantic code search, analysis, and indexing operations.
 import typer
 from typing import Optional
 from codesearch import __version__
-from codesearch.cli.commands import pattern, find_similar, dependencies, index, refactor_dupes
+from codesearch.cli.commands import (
+    pattern, find_similar, dependencies, index, refactor_dupes, list_functions
+)
 
 
 def version_callback(value: bool) -> None:
@@ -60,6 +62,7 @@ app.command(name="find-similar")(find_similar)
 app.command(name="deps")(dependencies)
 app.command(name="index")(index)
 app.command(name="refactor-dupes")(refactor_dupes)
+app.command(name="list-functions")(list_functions)
 
 
 def run() -> None:
