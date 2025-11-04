@@ -8,7 +8,8 @@ import typer
 from typing import Optional
 from codesearch import __version__
 from codesearch.cli.commands import (
-    pattern, find_similar, dependencies, index, refactor_dupes, list_functions
+    pattern, find_similar, dependencies, index, refactor_dupes, list_functions,
+    repo_list, repo_add, repo_remove, search_multi
 )
 from codesearch.cli.interactive import (
     detail, context, compare, config_show, config_init
@@ -73,6 +74,12 @@ app.command(name="context")(context)
 app.command(name="compare")(compare)
 app.command(name="config-show")(config_show)
 app.command(name="config-init")(config_init)
+
+# Register repository management commands
+app.command(name="repo-list")(repo_list)
+app.command(name="repo-add")(repo_add)
+app.command(name="repo-remove")(repo_remove)
+app.command(name="search-multi")(search_multi)
 
 
 def run() -> None:

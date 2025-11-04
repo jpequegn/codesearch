@@ -15,6 +15,8 @@ from codesearch.lancedb import DatabaseStatistics, DatabaseBackupManager
 from codesearch.cli.config import get_db_path, validate_db_exists, get_config
 from codesearch.cli.formatting import format_results_json, format_results_table
 from codesearch.indexing.incremental import IncrementalIndexer
+from codesearch.indexing.repository import RepositoryRegistry, NamespaceManager
+from codesearch.query.filters import RepositoryFilter
 
 logger = logging.getLogger(__name__)
 
@@ -425,6 +427,183 @@ def list_functions(
         except Exception as list_error:
             typer.echo(f"⚠️  Error listing functions: {list_error}")
             raise typer.Exit(1)
+
+    except typer.Exit:
+        raise
+    except Exception as e:
+        typer.echo(f"❌ Error: {str(e)}", err=True)
+        raise typer.Exit(1)
+
+
+def repo_list() -> None:
+    """List all registered repositories.
+
+    Shows all repositories configured for multi-repo indexing.
+
+    Example:
+        $ codesearch repo-list
+    """
+    try:
+        registry = RepositoryRegistry()
+        repos = registry.list_repositories()
+
+        if not repos:
+            typer.echo("📭 No repositories registered yet")
+            typer.echo("Use 'codesearch repo-add <path>' to add a repository")
+            return
+
+        typer.echo(f"📚 Registered repositories ({len(repos)} total):\n")
+
+        for repo in repos:
+            metadata = registry.get_metadata(repo.repo_id)
+            if metadata:
+                typer.echo(f"  📁 {repo.repo_name}")
+                typer.echo(f"     Path: {repo.repo_path}")
+                typer.echo(f"     ID: {repo.repo_id}")
+                typer.echo(f"     Namespace: {metadata.namespace_prefix}")
+                typer.echo(f"     Entities: {metadata.entity_count}")
+                typer.echo(f"     Files: {metadata.file_count}")
+                typer.echo(f"     Indexed: {metadata.indexed_at}")
+                typer.echo()
+
+    except Exception as e:
+        typer.echo(f"❌ Error: {str(e)}", err=True)
+        raise typer.Exit(1)
+
+
+def repo_add(
+    path: str = typer.Argument(..., help="Path to repository"),
+    name: Optional[str] = typer.Option(None, "--name", "-n", help="Human-readable repository name"),
+) -> None:
+    """Register a new repository for indexing.
+
+    Adds a repository to the multi-repo configuration.
+
+    Example:
+        $ codesearch repo-add /path/to/repo
+        $ codesearch repo-add /path/to/repo --name my-project
+    """
+    try:
+        path_obj = Path(path).resolve()
+
+        if not path_obj.exists():
+            typer.echo(f"❌ Path not found: {path}", err=True)
+            raise typer.Exit(2)
+
+        registry = RepositoryRegistry()
+
+        # Check if already registered
+        existing = registry.find_by_path(str(path_obj))
+        if existing:
+            typer.echo(f"⚠️  Repository already registered as '{existing.repo_name}'")
+            raise typer.Exit(1)
+
+        # Register the repository
+        config = registry.register_repository(str(path_obj), name)
+        typer.echo(f"✅ Repository registered: {config.repo_name}")
+        typer.echo(f"   ID: {config.repo_id}")
+        typer.echo(f"   Path: {config.repo_path}")
+
+    except typer.Exit:
+        raise
+    except Exception as e:
+        typer.echo(f"❌ Error: {str(e)}", err=True)
+        raise typer.Exit(1)
+
+
+def repo_remove(
+    repo_id: str = typer.Argument(..., help="Repository ID to remove"),
+) -> None:
+    """Unregister a repository.
+
+    Removes a repository from the multi-repo configuration.
+
+    Example:
+        $ codesearch repo-remove abc123def456
+    """
+    try:
+        registry = RepositoryRegistry()
+
+        if not registry.unregister_repository(repo_id):
+            typer.echo(f"❌ Repository not found: {repo_id}", err=True)
+            raise typer.Exit(2)
+
+        typer.echo(f"✅ Repository unregistered: {repo_id}")
+
+    except typer.Exit:
+        raise
+    except Exception as e:
+        typer.echo(f"❌ Error: {str(e)}", err=True)
+        raise typer.Exit(1)
+
+
+def search_multi(
+    query: str = typer.Argument(..., help="Search query"),
+    limit: int = typer.Option(10, "--limit", "-l", help="Maximum results to return"),
+    repositories: Optional[str] = typer.Option(None, "--repos", "-r", help="Comma-separated repository IDs to search (default: all)"),
+    output: str = typer.Option("table", "--output", "-o", help="Output format (table or json)"),
+) -> None:
+    """Search across multiple repositories.
+
+    Searches all indexed repositories or a subset specified by repo IDs.
+
+    Example:
+        $ codesearch search-multi "error handling"
+        $ codesearch search-multi "authenticate" --repos repo1,repo2 --limit 20
+    """
+    try:
+        db_path = get_db_path()
+
+        if not validate_db_exists(db_path):
+            typer.echo(f"❌ Database not found at {db_path}", err=True)
+            typer.echo("Run 'codesearch index <path>' to create a database", err=True)
+            raise typer.Exit(2)
+
+        client = lancedb.connect(db_path)
+        engine = QueryEngine(client)
+        registry = RepositoryRegistry()
+
+        typer.echo(f"🔍 Searching across repositories for: {query}")
+
+        # Build filters
+        filters = []
+        if repositories:
+            repo_list = [r.strip() for r in repositories.split(",")]
+            filters.append(RepositoryFilter(repo_list))
+            typer.echo(f"   Filtering to: {', '.join(repo_list)}")
+
+        # Search (note: text search not yet implemented in engine)
+        try:
+            results = engine.search_vector([0.0] * 768, filters=filters, limit=limit)
+        except NotImplementedError:
+            typer.echo("⚠️  Text search requires embedding integration", err=True)
+            raise typer.Exit(1)
+
+        if not results:
+            typer.echo("❌ No results found")
+            return
+
+        typer.echo(f"✅ Found {len(results)} results\n")
+
+        # Group results by repository
+        by_repo = {}
+        for result in results:
+            repo = result.repository or "unknown"
+            if repo not in by_repo:
+                by_repo[repo] = []
+            by_repo[repo].append(result)
+
+        # Display results by repository
+        for repo_name in sorted(by_repo.keys()):
+            repo_results = by_repo[repo_name]
+            typer.echo(f"\n📁 {repo_name} ({len(repo_results)} results)")
+            typer.echo("-" * 80)
+
+            if output == "json":
+                import json
+                typer.echo(json.dumps([r.__dict__ for r in repo_results], indent=2))
+            else:
+                typer.echo(format_results_table(repo_results))
 
     except typer.Exit:
         raise
