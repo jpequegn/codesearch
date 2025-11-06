@@ -155,27 +155,99 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for comprehensive design docume
    - Incremental updates (only changed files)
    - Multi-repository support with audit trails
 
+## Installation
+
+For detailed installation instructions, see [docs/INSTALLATION.md](docs/INSTALLATION.md).
+
+**Quick install:**
+```bash
+pip install codesearch
+```
+
+**Development install:**
+```bash
+git clone https://github.com/jpequegn/codesearch.git
+cd codesearch
+pip install -e ".[dev]"
+```
+
 ## Development
 
-```bash
-# Setup development environment
-python -m venv venv
-source venv/bin/activate
-pip install -e ".[dev]"
+### Setup
 
-# Run tests
-pytest
+```bash
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+
+# Upgrade pip
+pip install --upgrade pip
+
+# Install with dev dependencies
+pip install -e ".[dev]"
+```
+
+### Quality Checks
+
+```bash
+# Run all tests with coverage
+pytest --cov=codesearch --cov-report=html
 
 # Format code
-black . && isort .
+black codesearch/ tests/
+isort codesearch/ tests/
 
 # Type checking
 mypy codesearch/
+
+# Lint with ruff
+ruff check codesearch/ tests/
 ```
+
+### Project Structure
+
+```
+codesearch/
+├── cli/                    # Command-line interface
+├── query/                  # Query infrastructure
+├── indexing/               # Data ingestion
+├── embeddings/             # Embedding generation
+├── lancedb/                # Database layer
+├── parsers/                # Code parsing
+├── caching/                # Caching system
+└── models.py               # Data models
+
+tests/
+├── cli/                    # CLI tests
+├── integration/            # Integration tests
+└── conftest.py             # Shared fixtures
+
+docs/
+├── ARCHITECTURE.md         # System design
+├── CLI.md                  # Command reference
+├── API.md                  # Python API
+├── INSTALLATION.md         # Setup guide
+└── TROUBLESHOOTING.md      # Troubleshooting
+```
+
+### See Also
+
+- [CONTRIBUTING.md](CONTRIBUTING.md) - Development guidelines
+- [docs/INSTALLATION.md](docs/INSTALLATION.md) - Installation guide
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - System design
+- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) - Troubleshooting
 
 ## Project Status
 
-🚧 **Under Development** - Currently in active development. See [GitHub Issues](https://github.com/your-username/codesearch/issues) for current work.
+📊 **Component Status**:
+- ✅ Component 5.1-5.5: Core features (indexing, caching, error handling, testing, documentation)
+- ✅ Component 5.6: Project documentation (README, architecture, CLI, API, troubleshooting)
+- ✅ Component 5.7: Project setup & deployment (this release)
+- 🔄 Component #9: LanceDB schema (in progress)
+- 🔄 Component #10: Data ingestion (in progress)
+- 🔄 Component #11: Query infrastructure (in progress)
+
+See [GitHub Issues](https://github.com/jpequegn/codesearch/issues) for current work.
 
 ## License
 

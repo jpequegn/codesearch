@@ -1,0 +1,193 @@
+# Codesearch Configuration File Example
+# Copy to ~/.codesearch/config.yaml to use custom configuration
+# All settings have sensible defaults if not specified
+
+# Database Configuration
+database:
+  # Path where embeddings and metadata are stored
+  # Default: ~/.codesearch
+  path: ~/.codesearch
+
+  # Maximum size of the database cache in memory (MB)
+  # Default: 512
+  cache_size_mb: 512
+
+  # Enable database encryption (future feature)
+  # Default: false
+  encryption_enabled: false
+
+# CLI Configuration
+cli:
+  # Default output format: table or json
+  # table: Pretty-printed terminal output with colors
+  # json: Machine-readable JSON format
+  # Default: table
+  default_format: table
+
+  # Default programming language filter
+  # Options: python, typescript, go
+  # Default: python
+  default_language: python
+
+  # Default number of results to return
+  # Default: 10
+  default_limit: 10
+
+  # Enable colored output
+  # Default: true
+  enable_colors: true
+
+# Indexing Configuration
+indexing:
+  # Number of parallel workers for indexing
+  # Default: CPU count
+  workers: 4
+
+  # Batch size for embedding generation
+  # Larger batches = more memory but faster
+  # Default: 32
+  batch_size: 32
+
+  # File patterns to exclude during indexing
+  exclude_patterns:
+    - "*.test.py"
+    - "*.spec.ts"
+    - "*_test.go"
+    - ".git/*"
+    - ".venv/*"
+    - "node_modules/*"
+    - "venv/*"
+
+  # File patterns to include (if specified, only these are indexed)
+  # Commented by default (includes all non-excluded files)
+  # include_patterns:
+  #   - "src/**/*.py"
+  #   - "lib/**/*.go"
+
+# Embedding Configuration
+embeddings:
+  # Embedding model to use
+  # Built-in options:
+  #   - all-MiniLM-L6-v2 (384 dims, fast, recommended)
+  #   - all-mpnet-base-v2 (768 dims, more accurate)
+  #   - codebert-base (768 dims, code-specific)
+  # Or use any HuggingFace sentence-transformers model
+  # Default: sentence-transformers/all-MiniLM-L6-v2
+  model: sentence-transformers/all-MiniLM-L6-v2
+
+  # Device to use for embeddings
+  # Options: auto (use CUDA if available, else CPU), cuda, cpu
+  # Default: auto
+  device: auto
+
+  # Batch size for generating embeddings
+  # Larger batches = more memory but faster
+  # Default: 32
+  batch_size: 32
+
+  # Directory to cache downloaded models
+  # Default: ~/.codesearch/models
+  cache_dir: ~/.codesearch/models
+
+# Query Configuration
+query:
+  # Default similarity threshold (0.0-1.0)
+  # Only results above this score are returned
+  # Default: 0.0 (return all results)
+  default_threshold: 0.0
+
+  # Maximum number of results per query
+  # Prevents memory issues with very large result sets
+  # Default: 1000
+  max_results: 1000
+
+  # Enable query caching
+  # Default: true
+  enable_caching: true
+
+  # Query cache TTL in seconds
+  # Default: 3600 (1 hour)
+  cache_ttl: 3600
+
+# Logging Configuration
+logging:
+  # Logging level
+  # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  # Default: INFO
+  level: INFO
+
+  # Enable console logging
+  # Default: true
+  console: true
+
+  # Enable file logging
+  # Default: false
+  file: false
+
+  # Log file path (if file logging enabled)
+  # Default: ~/.codesearch/codesearch.log
+  file_path: ~/.codesearch/codesearch.log
+
+  # Maximum log file size in MB before rotation
+  # Default: 10
+  max_file_size_mb: 10
+
+  # Number of backup log files to keep
+  # Default: 3
+  backup_count: 3
+
+# Performance Tuning
+performance:
+  # Enable query result caching
+  # Default: true
+  enable_caching: true
+
+  # Cache size in number of queries
+  # Default: 100
+  cache_size: 100
+
+  # Enable memory mapping for large databases
+  # Default: true
+  enable_mmap: true
+
+  # Pre-load common queries on startup
+  # Default: false
+  preload_common: false
+
+# Development Configuration (for development use only)
+development:
+  # Enable debug mode
+  # Default: false
+  debug: false
+
+  # Enable verbose output
+  # Default: false
+  verbose: false
+
+  # Profile code execution
+  # Default: false
+  profiling: false
+
+# Advanced Configuration
+advanced:
+  # Similarity metric for vector search
+  # Options: cosine, euclidean, dot_product
+  # Default: cosine
+  similarity_metric: cosine
+
+  # Enable approximate nearest neighbor search (faster, less accurate)
+  # Default: false
+  use_approximate_search: false
+
+  # Number of vectors to examine in approximate search
+  # Higher = more accurate, slower
+  # Default: 100
+  approximate_search_candidates: 100
+
+  # Enable query optimization
+  # Default: true
+  enable_query_optimization: true
+
+  # Enable index statistics collection
+  # Default: false
+  collect_statistics: false
