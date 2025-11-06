@@ -4,14 +4,30 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codesearch"
-version = "0.1.0"
-description = "Semantic code search using vector embeddings and LanceDB"
+version = "0.2.0"
+description = "Semantic code search powered by vector embeddings and LanceDB"
 readme = "README.md"
 requires-python = ">=3.9"
 authors = [
-    {name = "Your Name", email = "your.email@example.com"}
+    {name = "Julien Pequegnot", email = "jpequegn@example.com"}
 ]
 license = {text = "MIT"}
+keywords = ["code-search", "semantic-search", "embeddings", "vector-database", "code-analysis"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: Tools",
+    "Topic :: System :: Shells",
+]
 
 dependencies = [
     "lancedb>=0.1.0",
@@ -25,6 +41,12 @@ dependencies = [
     "rich==13.7.0",
 ]
 
+[project.urls]
+Repository = "https://github.com/jpequegn/codesearch"
+Documentation = "https://github.com/jpequegn/codesearch/tree/main/docs"
+Homepage = "https://github.com/jpequegn/codesearch"
+Issues = "https://github.com/jpequegn/codesearch/issues"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
@@ -37,6 +59,10 @@ dev = [
 
 [project.scripts]
 codesearch = "codesearch.cli.main:app"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["codesearch*"]
 
 [tool.black]
 line-length = 100
@@ -52,4 +78,33 @@ warn_unused_configs = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=codesearch --cov-report=term-missing"
+addopts = "--cov=codesearch --cov-report=term-missing --cov-report=html"
+minversion = "7.0"
+python_files = ["test_*.py", "*_test.py"]
+
+[tool.coverage.run]
+branch = true
+source = ["codesearch"]
+omit = [
+    "*/tests/*",
+    "*/test_*.py",
+    "setup.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "class .*Protocol\\):",
+    "@abstractmethod",
+]
+
+[tool.ruff]
+select = ["E", "F", "I", "N", "W", "ANN", "B", "C4", "SIM"]
+ignore = ["E501", "ANN101", "ANN102"]
+line-length = 100
+target-version = "py39"
