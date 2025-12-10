@@ -533,3 +533,68 @@ class TestIntegration:
         backups = manager.list_backups()
         backup_names = [b["name"] for b in backups]
         assert "cycle_backup" in backup_names
+
+
+class TestConfigurableEmbeddingDimensions:
+    """Tests for configurable embedding dimensions in schema."""
+
+    def test_default_dimensions(self, temp_db_dir):
+        """Test that default dimensions (768) are used when not specified."""
+        initializer = DatabaseInitializer(temp_db_dir)
+        initializer.initialize()
+
+        assert initializer.embedding_dimensions == 768
+        assert initializer.get_embedding_dimensions() == 768
+
+    def test_custom_dimensions_256(self, temp_db_dir):
+        """Test initializing with 256 dimensions (CodeT5+-110M)."""
+        initializer = DatabaseInitializer(temp_db_dir, embedding_dimensions=256)
+        initializer.initialize()
+
+        assert initializer.embedding_dimensions == 256
+        assert initializer.get_embedding_dimensions() == 256
+
+    def test_custom_dimensions_1024(self, temp_db_dir):
+        """Test initializing with 1024 dimensions (CodeT5+-770M)."""
+        initializer = DatabaseInitializer(temp_db_dir, embedding_dimensions=1024)
+        initializer.initialize()
+
+        assert initializer.embedding_dimensions == 1024
+        assert initializer.get_embedding_dimensions() == 1024
+
+    def test_dimensions_persisted_in_config(self, temp_db_dir):
+        """Test that embedding dimensions are persisted in config file."""
+        initializer = DatabaseInitializer(temp_db_dir, embedding_dimensions=256)
+        initializer.initialize()
+
+        # Read config directly
+        with open(initializer.config_file) as f:
+            config = json.load(f)
+
+        assert config["embedding_dimensions"] == 256
+
+    def test_schema_uses_correct_dimensions(self, temp_db_dir):
+        """Test that the schema uses the configured dimensions."""
+        import lancedb
+        import pyarrow as pa
+
+        initializer = DatabaseInitializer(temp_db_dir, embedding_dimensions=256)
+        initializer.initialize()
+
+        # Open table and check vector field dimensions
+        db = lancedb.connect(str(temp_db_dir))
+        table = db.open_table("code_entities")
+        schema = table.schema
+
+        # Find the code_vector field and check its dimensions
+        code_vector_field = None
+        for field in schema:
+            if field.name == "code_vector":
+                code_vector_field = field
+                break
+
+        assert code_vector_field is not None
+        # The list type should have size 256
+        list_type = code_vector_field.type
+        assert isinstance(list_type, pa.FixedSizeListType)
+        assert list_type.list_size == 256

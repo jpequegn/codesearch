@@ -116,6 +116,16 @@ MODEL_REGISTRY: Dict[str, EmbeddingConfig] = {
         pooling=PoolingStrategy.MEAN,
     ),
 
+    # Salesforce CodeT5+ 770M - largest version, GPU recommended
+    # Uses encoder-only for embeddings from encoder-decoder model
+    "codet5p-770m": EmbeddingConfig(
+        model_name="codet5p-770m",
+        model_path="Salesforce/codet5p-770m",
+        dimensions=1024,
+        max_length=512,
+        pooling=PoolingStrategy.MEAN,
+    ),
+
     # GraphCodeBERT - code + data flow aware
     "graphcodebert": EmbeddingConfig(
         model_name="graphcodebert",
