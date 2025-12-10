@@ -1,6 +1,6 @@
 """Tests for CLI commands."""
 
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 from typer.testing import CliRunner
@@ -135,21 +135,157 @@ def test_find_similar_no_database():
 
 
 def test_dependencies_command():
-    """Test dependencies command."""
+    """Test dependencies command with callers and callees."""
     with patch("codesearch.cli.commands.lancedb.connect") as mock_connect:
         with patch("codesearch.cli.commands.get_db_path", return_value="/tmp/test.db"):
             with patch("codesearch.cli.commands.validate_db_exists", return_value=True):
-                result = runner.invoke(app, ["dependencies", "parse"])
+                # Mock entities table
+                mock_entities_table = MagicMock()
+                mock_entities_search = MagicMock()
+                mock_entities_search.where.return_value = mock_entities_search
+                mock_entities_search.limit.return_value = mock_entities_search
+                mock_entities_search.to_list.side_effect = [
+                    # First call: find entity by name
+                    [{"entity_id": "abc123", "name": "parse", "file_path": "test.py"}],
+                    # Second call: get all entities for name lookup
+                    [
+                        {"entity_id": "abc123", "name": "parse", "file_path": "test.py"},
+                        {"entity_id": "def456", "name": "helper", "file_path": "utils.py"},
+                        {"entity_id": "ghi789", "name": "main", "file_path": "main.py"},
+                    ],
+                ]
+                mock_entities_table.search.return_value = mock_entities_search
+
+                # Mock relationships table
+                mock_rels_table = MagicMock()
+                mock_rels_search = MagicMock()
+                mock_rels_search.to_list.return_value = [
+                    # parse calls helper
+                    {"caller_id": "abc123", "callee_id": "def456", "relationship_type": "calls"},
+                    # main calls parse
+                    {"caller_id": "ghi789", "callee_id": "abc123", "relationship_type": "calls"},
+                ]
+                mock_rels_table.search.return_value = mock_rels_search
+
+                # Setup mock client
+                mock_client = MagicMock()
+                mock_client.open_table.side_effect = lambda name: (
+                    mock_entities_table if name == "code_entities" else mock_rels_table
+                )
+                mock_connect.return_value = mock_client
+
+                result = runner.invoke(app, ["deps", "parse"])
                 assert result.exit_code == 0
-                assert "Dependencies for 'parse'" in result.stdout
+                assert "Call graph for 'parse'" in result.stdout
+                # Should show both callers and calls
+                assert "Called by:" in result.stdout
+                assert "Calls:" in result.stdout
 
 
 def test_dependencies_no_database():
-    """Test dependencies when database doesn't exist."""
+    """Test deps when database doesn't exist."""
     with patch("codesearch.cli.commands.get_db_path", return_value="/tmp/test.db"):
         with patch("codesearch.cli.commands.validate_db_exists", return_value=False):
-            result = runner.invoke(app, ["dependencies", "parse"])
+            result = runner.invoke(app, ["deps", "parse"])
             assert result.exit_code == 2
+
+
+def test_dependencies_entity_not_found():
+    """Test deps command when entity is not found."""
+    with patch("codesearch.cli.commands.lancedb.connect") as mock_connect:
+        with patch("codesearch.cli.commands.get_db_path", return_value="/tmp/test.db"):
+            with patch("codesearch.cli.commands.validate_db_exists", return_value=True):
+                # Mock entities table to return no results
+                mock_entities_table = MagicMock()
+                mock_entities_search = MagicMock()
+                mock_entities_search.where.return_value = mock_entities_search
+                mock_entities_search.limit.return_value = mock_entities_search
+                mock_entities_search.to_list.return_value = []
+                mock_entities_table.search.return_value = mock_entities_search
+
+                mock_client = MagicMock()
+                mock_client.open_table.return_value = mock_entities_table
+                mock_connect.return_value = mock_client
+
+                result = runner.invoke(app, ["deps", "nonexistent_func"])
+                assert result.exit_code == 3
+                assert "not found" in result.stdout
+
+
+def test_dependencies_json_output():
+    """Test deps command with JSON output format."""
+    with patch("codesearch.cli.commands.lancedb.connect") as mock_connect:
+        with patch("codesearch.cli.commands.get_db_path", return_value="/tmp/test.db"):
+            with patch("codesearch.cli.commands.validate_db_exists", return_value=True):
+                # Mock entities table
+                mock_entities_table = MagicMock()
+                mock_entities_search = MagicMock()
+                mock_entities_search.where.return_value = mock_entities_search
+                mock_entities_search.limit.return_value = mock_entities_search
+                mock_entities_search.to_list.side_effect = [
+                    [{"entity_id": "abc123", "name": "parse", "file_path": "test.py"}],
+                    [
+                        {"entity_id": "abc123", "name": "parse", "file_path": "test.py"},
+                        {"entity_id": "def456", "name": "helper", "file_path": "utils.py"},
+                    ],
+                ]
+                mock_entities_table.search.return_value = mock_entities_search
+
+                # Mock relationships table
+                mock_rels_table = MagicMock()
+                mock_rels_search = MagicMock()
+                mock_rels_search.to_list.return_value = [
+                    {"caller_id": "abc123", "callee_id": "def456", "relationship_type": "calls"},
+                ]
+                mock_rels_table.search.return_value = mock_rels_search
+
+                mock_client = MagicMock()
+                mock_client.open_table.side_effect = lambda name: (
+                    mock_entities_table if name == "code_entities" else mock_rels_table
+                )
+                mock_connect.return_value = mock_client
+
+                result = runner.invoke(app, ["deps", "parse", "--output", "json"])
+                assert result.exit_code == 0
+                assert '"entity": "parse"' in result.stdout
+                assert '"calls"' in result.stdout
+
+
+def test_dependencies_direction_calls():
+    """Test deps command with --direction calls."""
+    with patch("codesearch.cli.commands.lancedb.connect") as mock_connect:
+        with patch("codesearch.cli.commands.get_db_path", return_value="/tmp/test.db"):
+            with patch("codesearch.cli.commands.validate_db_exists", return_value=True):
+                mock_entities_table = MagicMock()
+                mock_entities_search = MagicMock()
+                mock_entities_search.where.return_value = mock_entities_search
+                mock_entities_search.limit.return_value = mock_entities_search
+                mock_entities_search.to_list.side_effect = [
+                    [{"entity_id": "abc123", "name": "parse", "file_path": "test.py"}],
+                    [
+                        {"entity_id": "abc123", "name": "parse", "file_path": "test.py"},
+                        {"entity_id": "def456", "name": "helper", "file_path": "utils.py"},
+                    ],
+                ]
+                mock_entities_table.search.return_value = mock_entities_search
+
+                mock_rels_table = MagicMock()
+                mock_rels_search = MagicMock()
+                mock_rels_search.to_list.return_value = [
+                    {"caller_id": "abc123", "callee_id": "def456", "relationship_type": "calls"},
+                ]
+                mock_rels_table.search.return_value = mock_rels_search
+
+                mock_client = MagicMock()
+                mock_client.open_table.side_effect = lambda name: (
+                    mock_entities_table if name == "code_entities" else mock_rels_table
+                )
+                mock_connect.return_value = mock_client
+
+                result = runner.invoke(app, ["deps", "parse", "--direction", "calls"])
+                assert result.exit_code == 0
+                assert "Functions called by 'parse'" in result.stdout
+                assert "Calls:" in result.stdout
 
 
 def test_index_command_with_scanner(tmp_path):
@@ -1074,3 +1210,112 @@ def test_index_command_converts_entities_correctly(tmp_path):
                                 for entity in captured_entities:
                                     assert entity.entity_id
                                     assert len(entity.entity_id) == 64  # SHA256 hex length
+
+
+def test_index_command_stores_relationships(tmp_path):
+    """Test index command extracts and stores call graph relationships."""
+    from datetime import datetime
+
+    from codesearch.models import FileMetadata, Function
+
+    # Create a real temp directory
+    test_repo = tmp_path / "test_repo"
+    test_repo.mkdir()
+
+    mock_files = [
+        FileMetadata(
+            file_path=str(test_repo / "test.py"),
+            language="python",
+            size_bytes=100,
+            modified_time=datetime.now(),
+            is_ignored=False,
+        ),
+    ]
+
+    # Create functions with call relationships
+    mock_entities = [
+        Function(
+            name="caller_func",
+            file_path=str(test_repo / "test.py"),
+            language="python",
+            source_code="def caller_func(): callee_func()",
+            line_number=1,
+            end_line=2,
+            calls_to=["callee_func"],  # This function calls callee_func
+        ),
+        Function(
+            name="callee_func",
+            file_path=str(test_repo / "test.py"),
+            language="python",
+            source_code="def callee_func(): pass",
+            line_number=4,
+            end_line=5,
+            calls_to=[],
+        ),
+    ]
+
+    captured_relationships = []
+
+    def capture_relationships(rels):
+        captured_relationships.extend(rels)
+        mock_result = Mock()
+        mock_result.relationships_inserted = len(rels)
+        mock_result.relationships_failed = 0
+        return mock_result
+
+    with patch("codesearch.cli.commands.lancedb.connect"):
+        with patch("codesearch.cli.commands.get_db_path", return_value=str(tmp_path / "test.db")):
+            with patch("codesearch.cli.commands.DatabaseInitializer") as mock_db_init_class:
+                mock_db_init = Mock()
+                mock_db_init.is_initialized.return_value = False
+                mock_db_init.initialize.return_value = True
+                mock_db_init_class.return_value = mock_db_init
+
+                with patch("codesearch.cli.commands.RepositoryScannerImpl") as mock_scanner_class:
+                    mock_scanner = Mock()
+                    mock_scanner.scan_repository.return_value = mock_files
+                    mock_scanner.get_statistics.return_value = {
+                        "total_files": 1,
+                        "by_language": {"python": 1},
+                        "total_size_bytes": 100,
+                    }
+                    mock_scanner.config = Mock()
+                    mock_scanner_class.return_value = mock_scanner
+
+                    with patch("codesearch.cli.commands.PythonParser") as mock_parser_class:
+                        mock_parser = Mock()
+                        mock_parser.parse_file.return_value = mock_entities
+                        mock_parser_class.return_value = mock_parser
+
+                        with patch("codesearch.cli.commands.EmbeddingGenerator") as mock_embedder_class:
+                            mock_embedder = Mock()
+                            mock_embedder.get_model_info.return_value = {
+                                "name": "codebert-base",
+                                "dimensions": 768,
+                                "device": "cpu",
+                            }
+                            mock_embedder.embed_batch.return_value = [[0.1] * 768 for _ in range(2)]
+                            mock_embedder_class.return_value = mock_embedder
+
+                            with patch("codesearch.cli.commands.DataIngestionPipeline") as mock_pipeline_class:
+                                mock_pipeline = Mock()
+                                mock_result = Mock()
+                                mock_result.inserted_count = 2
+                                mock_result.skipped_count = 0
+                                mock_result.failed_count = 0
+                                mock_pipeline.ingest_batch.return_value = mock_result
+                                mock_pipeline.ingest_relationships.side_effect = capture_relationships
+                                mock_pipeline_class.return_value = mock_pipeline
+
+                                with patch("codesearch.cli.commands.Console"):
+                                    result = runner.invoke(app, ["index", str(test_repo), "--force"])
+
+                                    # Check that indexing completed
+                                    assert result.exit_code == 0
+
+                                    # Verify relationships were captured
+                                    assert len(captured_relationships) == 1
+
+                                    # The relationship should be caller_func -> callee_func
+                                    rel = captured_relationships[0]
+                                    assert rel.relationship_type == "calls"

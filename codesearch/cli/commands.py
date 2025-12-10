@@ -22,7 +22,7 @@ from codesearch.indexing.repository import RepositoryRegistry
 from codesearch.indexing.scanner import RepositoryScannerImpl
 from codesearch.lancedb import DatabaseBackupManager, DatabaseStatistics
 from codesearch.lancedb.initialization import DatabaseInitializer
-from codesearch.models import Class, CodeEntity, Function
+from codesearch.models import Class, CodeEntity, CodeRelationship, Function
 from codesearch.parsers.python_parser import PythonParser
 from codesearch.query import QueryEngine
 from codesearch.query.filters import RepositoryFilter
@@ -156,11 +156,11 @@ def dependencies(
 ) -> None:
     """Analyze call graph and dependencies for a code entity.
 
-    Shows relationships like function calls, class inheritance, and imports.
+    Shows what functions the target calls and what functions call the target.
 
     Example:
-        $ codesearch dependencies main_function --direction calls
-        $ codesearch dependencies MyClass --direction callers
+        $ codesearch deps main_function --direction calls
+        $ codesearch deps MyClass.method --direction callers
     """
     try:
         db_path = get_db_path()
@@ -172,47 +172,132 @@ def dependencies(
         client = lancedb.connect(db_path)
 
         try:
+            # First, find the entity by name to get its entity_id
+            entities_table = client.open_table("code_entities")
+
+            # Search for entity by name using LanceDB where clause
+            safe_name = entity_name.replace("'", "''")
+            entity_results = (
+                entities_table.search()
+                .where(f"name = '{safe_name}'", prefilter=True)
+                .limit(1)
+                .to_list()
+            )
+
+            if not entity_results:
+                typer.echo(f"❌ Entity '{entity_name}' not found in database")
+                raise typer.Exit(3)
+
+            entity = entity_results[0]
+            entity_id = entity.get("entity_id")
+
+            # Build lookup table for entity names by ID
+            all_entities = entities_table.search().to_list()
+            entity_name_by_id = {e.get("entity_id"): e.get("name") for e in all_entities}
+            entity_file_by_id = {e.get("entity_id"): e.get("file_path") for e in all_entities}
+
             # Query relationships table
             relationships_table = client.open_table("code_relationships")
-
-            # Build query based on direction
             all_rels = relationships_table.search().to_list()
 
-            if direction == "calls":
-                rels = [r for r in all_rels if r.get("source_id") == entity_name]
-                rel_type = "calls"
-            elif direction == "callers":
-                rels = [r for r in all_rels if r.get("target_id") == entity_name]
-                rel_type = "called by"
-            else:  # both
-                rels = [r for r in all_rels if r.get("source_id") == entity_name or r.get("target_id") == entity_name]
-                rel_type = "related to"
+            # Filter based on direction
+            callers = []  # Functions that call this entity
+            callees = []  # Functions this entity calls
 
-            if not rels:
+            for rel in all_rels:
+                if rel.get("callee_id") == entity_id:
+                    callers.append(rel)
+                if rel.get("caller_id") == entity_id:
+                    callees.append(rel)
+
+            # Determine what to show based on direction
+            if direction == "calls":
+                rels_to_show = callees
+                header = f"Functions called by '{entity_name}'"
+            elif direction == "callers":
+                rels_to_show = callers
+                header = f"Functions that call '{entity_name}'"
+            else:  # both
+                rels_to_show = None  # Show both sections
+                header = f"Call graph for '{entity_name}'"
+
+            if rels_to_show is not None and not rels_to_show:
                 typer.echo(f"No dependencies found for '{entity_name}'")
                 raise typer.Exit(0)
 
-            typer.echo(f"📊 Dependencies for '{entity_name}' ({rel_type}):\n")
+            if direction == "both" and not callers and not callees:
+                typer.echo(f"No dependencies found for '{entity_name}'")
+                raise typer.Exit(0)
 
-            for rel in rels[:20]:  # Limit to 20 results
-                source = rel.get("source_id", "unknown")
-                target = rel.get("target_id", "unknown")
-                rel_type_str = rel.get("relationship_type", "calls")
-                typer.echo(f"  {source} → {target} ({rel_type_str})")
+            typer.echo(f"📊 {header}\n")
 
-            if len(rels) > 20:
-                typer.echo(f"\n... and {len(rels) - 20} more")
+            if output == "json":
+                import json
+                result_data = {
+                    "entity": entity_name,
+                    "entity_id": entity_id,
+                    "callers": [
+                        {
+                            "name": entity_name_by_id.get(r.get("caller_id"), "unknown"),
+                            "file": entity_file_by_id.get(r.get("caller_id"), "unknown"),
+                        }
+                        for r in callers
+                    ] if direction in ["callers", "both"] else [],
+                    "calls": [
+                        {
+                            "name": entity_name_by_id.get(r.get("callee_id"), "unknown"),
+                            "file": entity_file_by_id.get(r.get("callee_id"), "unknown"),
+                        }
+                        for r in callees
+                    ] if direction in ["calls", "both"] else [],
+                }
+                typer.echo(json.dumps(result_data, indent=2))
+            else:
+                # Table format
+                if direction in ["callers", "both"] and callers:
+                    typer.echo("  📥 Called by:")
+                    for rel in callers[:20]:
+                        caller_id = rel.get("caller_id")
+                        caller_name = entity_name_by_id.get(caller_id, "unknown")
+                        caller_file = entity_file_by_id.get(caller_id, "")
+                        typer.echo(f"     ← {caller_name} ({caller_file})")
+                    if len(callers) > 20:
+                        typer.echo(f"     ... and {len(callers) - 20} more")
 
+                if direction == "both" and callers and callees:
+                    typer.echo()
+
+                if direction in ["calls", "both"] and callees:
+                    typer.echo("  📤 Calls:")
+                    for rel in callees[:20]:
+                        callee_id = rel.get("callee_id")
+                        callee_name = entity_name_by_id.get(callee_id, "unknown")
+                        callee_file = entity_file_by_id.get(callee_id, "")
+                        typer.echo(f"     → {callee_name} ({callee_file})")
+                    if len(callees) > 20:
+                        typer.echo(f"     ... and {len(callees) - 20} more")
+
+                # Summary
+                typer.echo()
+                if direction == "both":
+                    typer.echo(f"  Summary: {len(callers)} callers, {len(callees)} calls")
+                elif direction == "callers":
+                    typer.echo(f"  Summary: {len(callers)} callers")
+                else:
+                    typer.echo(f"  Summary: {len(callees)} calls")
+
+        except typer.Exit:
+            raise
         except Exception as table_error:
             typer.echo(f"⚠️  Relationships table not available: {table_error}")
             typer.echo("Make sure to index your repository first", err=True)
-            raise typer.Exit(1)
+            raise typer.Exit(1) from None
 
     except typer.Exit:
         raise
     except Exception as e:
         typer.echo(f"❌ Error: {str(e)}", err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
 
 def _to_code_entity(
@@ -490,6 +575,51 @@ def index(
         except Exception as e:
             typer.echo(f"❌ Database storage error: {e}", err=True)
             raise typer.Exit(1) from None
+
+        # Extract and store relationships (call graph)
+        typer.echo("🔗 Extracting call graph relationships...")
+
+        # Build entity_id lookup by name for resolving calls
+        entity_id_by_name: dict[str, str] = {}
+        for entity in all_entities:
+            if isinstance(entity, Function):
+                # Use simple name for lookup (may have collisions)
+                entity_id = hashlib.sha256(
+                    f"{entity.file_path}:{entity.line_number}:{entity.name}".encode()
+                ).hexdigest()
+                entity_id_by_name[entity.name] = entity_id
+                # Also store with class prefix for methods
+                if entity.class_name:
+                    entity_id_by_name[f"{entity.class_name}.{entity.name}"] = entity_id
+
+        # Extract relationships from functions with calls_to
+        relationships: list[CodeRelationship] = []
+        for entity in all_entities:
+            if isinstance(entity, Function) and entity.calls_to:
+                caller_id = hashlib.sha256(
+                    f"{entity.file_path}:{entity.line_number}:{entity.name}".encode()
+                ).hexdigest()
+
+                for call_name in entity.calls_to:
+                    # Try to resolve the callee
+                    callee_id = entity_id_by_name.get(call_name)
+                    if callee_id:
+                        relationships.append(CodeRelationship(
+                            caller_id=caller_id,
+                            callee_id=callee_id,
+                            relationship_type="calls",
+                        ))
+
+        if relationships:
+            try:
+                rel_result = pipeline.ingest_relationships(relationships)
+                typer.echo(f"🔗 Stored {rel_result.relationships_inserted} relationships")
+                if rel_result.relationships_failed > 0:
+                    typer.echo(f"   ⚠️  {rel_result.relationships_failed} relationship errors")
+            except Exception as rel_error:
+                typer.echo(f"   ⚠️  Could not store relationships: {rel_error}")
+        else:
+            typer.echo("🔗 No call relationships found")
 
         typer.echo("\n✅ Indexing complete!")
         typer.echo(f"Database saved to {db_path}")
