@@ -112,7 +112,21 @@ def test_pattern_command_with_limit(mock_search_results):
 
 
 def test_find_similar_command(mock_search_results):
-    """Test find-similar command."""
+    """Test find-similar command finds entity and returns similar results."""
+    # Mock entity found in database
+    mock_entity = {
+        "entity_id": "repo:file.py:parse",
+        "name": "parse",
+        "code_text": "def parse(): pass",
+        "code_vector": [0.1] * 768,
+        "language": "python",
+        "file_path": "file.py",
+        "repository": "repo",
+        "entity_type": "function",
+        "start_line": 1,
+        "end_line": 2,
+    }
+
     with patch("codesearch.cli.commands.QueryEngine") as mock_engine_class:
         mock_engine = Mock()
         mock_engine.search_vector.return_value = mock_search_results[1:]  # Exclude original
@@ -120,9 +134,39 @@ def test_find_similar_command(mock_search_results):
 
         with patch("codesearch.cli.commands.get_db_path", return_value="/tmp/test.db"):
             with patch("codesearch.cli.commands.validate_db_exists", return_value=True):
-                with patch("codesearch.cli.commands.lancedb.connect"):
+                with patch("codesearch.cli.commands.lancedb.connect") as mock_connect:
+                    # Setup mock table with entity lookup
+                    mock_table = Mock()
+                    mock_search = Mock()
+                    mock_search.where.return_value = mock_search
+                    mock_search.limit.return_value = mock_search
+                    mock_search.to_list.return_value = [mock_entity]
+                    mock_table.search.return_value = mock_search
+                    mock_connect.return_value.open_table.return_value = mock_table
+
                     result = runner.invoke(app, ["find-similar", "parse"])
                     assert result.exit_code == 0
+                    assert "Finding similar code" in result.stdout
+                    assert "Found" in result.stdout
+
+
+def test_find_similar_entity_not_found():
+    """Test find-similar when entity is not in database."""
+    with patch("codesearch.cli.commands.get_db_path", return_value="/tmp/test.db"):
+        with patch("codesearch.cli.commands.validate_db_exists", return_value=True):
+            with patch("codesearch.cli.commands.lancedb.connect") as mock_connect:
+                # Setup mock table that returns no entities
+                mock_table = Mock()
+                mock_search = Mock()
+                mock_search.where.return_value = mock_search
+                mock_search.limit.return_value = mock_search
+                mock_search.to_list.return_value = []  # No entity found
+                mock_table.search.return_value = mock_search
+                mock_connect.return_value.open_table.return_value = mock_table
+
+                result = runner.invoke(app, ["find-similar", "nonexistent"])
+                assert result.exit_code == 3
+                assert "not found in database" in result.stdout
 
 
 def test_find_similar_no_database():
@@ -131,7 +175,78 @@ def test_find_similar_no_database():
         with patch("codesearch.cli.commands.validate_db_exists", return_value=False):
             result = runner.invoke(app, ["find-similar", "parse"])
             assert result.exit_code == 2
-            assert "Database not found" in result.stdout
+            assert "Database not found" in result.output
+
+
+def test_find_similar_entity_no_embedding():
+    """Test find-similar when entity has no embedding vector."""
+    # Mock entity without embedding
+    mock_entity = {
+        "entity_id": "repo:file.py:parse",
+        "name": "parse",
+        "code_text": "def parse(): pass",
+        "code_vector": None,  # No embedding
+        "language": "python",
+        "file_path": "file.py",
+    }
+
+    with patch("codesearch.cli.commands.get_db_path", return_value="/tmp/test.db"):
+        with patch("codesearch.cli.commands.validate_db_exists", return_value=True):
+            with patch("codesearch.cli.commands.lancedb.connect") as mock_connect:
+                mock_table = Mock()
+                mock_search = Mock()
+                mock_search.where.return_value = mock_search
+                mock_search.limit.return_value = mock_search
+                mock_search.to_list.return_value = [mock_entity]
+                mock_table.search.return_value = mock_search
+                mock_connect.return_value.open_table.return_value = mock_table
+
+                result = runner.invoke(app, ["find-similar", "parse"])
+                assert result.exit_code == 2
+                assert "has no embedding vector" in result.stdout
+
+
+def test_find_similar_excludes_self(mock_search_results):
+    """Test find-similar excludes the original entity from results."""
+    mock_entity = {
+        "entity_id": "repo:file.py:parse",
+        "name": "parse",
+        "code_text": "def parse(): pass",
+        "code_vector": [0.1] * 768,
+        "language": "python",
+        "file_path": "file.py",
+        "repository": "repo",
+        "entity_type": "function",
+        "start_line": 1,
+        "end_line": 2,
+    }
+
+    # Results include the original entity (should be filtered out)
+    all_results = [
+        mock_search_results[0],  # Original entity - should be excluded
+        mock_search_results[1],  # Different entity - should be included
+    ]
+
+    with patch("codesearch.cli.commands.QueryEngine") as mock_engine_class:
+        mock_engine = Mock()
+        mock_engine.search_vector.return_value = all_results
+        mock_engine_class.return_value = mock_engine
+
+        with patch("codesearch.cli.commands.get_db_path", return_value="/tmp/test.db"):
+            with patch("codesearch.cli.commands.validate_db_exists", return_value=True):
+                with patch("codesearch.cli.commands.lancedb.connect") as mock_connect:
+                    mock_table = Mock()
+                    mock_search = Mock()
+                    mock_search.where.return_value = mock_search
+                    mock_search.limit.return_value = mock_search
+                    mock_search.to_list.return_value = [mock_entity]
+                    mock_table.search.return_value = mock_search
+                    mock_connect.return_value.open_table.return_value = mock_table
+
+                    result = runner.invoke(app, ["find-similar", "parse"])
+                    assert result.exit_code == 0
+                    # Should find results (the non-original entity)
+                    assert "Found" in result.stdout
 
 
 def test_dependencies_command():
