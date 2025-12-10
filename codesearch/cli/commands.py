@@ -102,14 +102,15 @@ def find_similar(
         # Try to get entity vector from database
         try:
             entities_table = client.open_table("code_entities")
-            results = entities_table.search().limit(limit + 1).to_list()
 
-            # Filter by name and language if needed
-            matching = [r for r in results if r.get("name") == entity_name]
+            # Use LanceDB where clause to find entity by name directly
+            # Escape single quotes in entity name for SQL safety
+            safe_name = entity_name.replace("'", "''")
+            matching = entities_table.search().where(f"name = '{safe_name}'").limit(10).to_list()
 
             if not matching:
                 typer.echo(f"❌ Entity '{entity_name}' not found in database")
-                raise typer.Exit(2)
+                raise typer.Exit(3)
 
             entity = matching[0]
             if "code_vector" not in entity or not entity["code_vector"]:
@@ -123,8 +124,9 @@ def find_similar(
                 limit=limit + 1
             )
 
-            # Filter out the original entity
-            filtered = [r for r in similar_results if r.name != entity_name][:limit]
+            # Filter out the original entity by entity_id (more reliable than name)
+            original_entity_id = entity.get("entity_id")
+            filtered = [r for r in similar_results if r.entity_id != original_entity_id][:limit]
 
             if not filtered:
                 typer.echo("❌ No similar results found")

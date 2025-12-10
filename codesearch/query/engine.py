@@ -20,7 +20,7 @@ class QueryEngine:
         self.client = client
         self._embedder = embedder
         try:
-            self.code_entities_table = client.get_table("code_entities")
+            self.code_entities_table = client.open_table("code_entities")
         except Exception as e:
             raise QueryError(f"Failed to initialize QueryEngine: {str(e)}", e)
 
@@ -144,6 +144,17 @@ class QueryEngine:
         distance = raw_result.get('_distance', 0.0)
         similarity = 1.0 - min(distance, 1.0)
 
+        # Handle both old schema (start_line/end_line) and new schema (line_count)
+        start_line = raw_result.get('start_line', 0)
+        end_line = raw_result.get('end_line', 0)
+
+        # If we only have line_count, estimate end_line
+        if start_line == 0 and end_line == 0:
+            line_count = raw_result.get('line_count', 0)
+            # Without start_line info, we can't determine exact position
+            start_line = 1
+            end_line = line_count if line_count > 0 else 1
+
         return SearchResult(
             entity_id=raw_result['entity_id'],
             name=raw_result['name'],
@@ -153,6 +164,6 @@ class QueryEngine:
             file_path=raw_result['file_path'],
             repository=raw_result['repository'],
             entity_type=raw_result['entity_type'],
-            start_line=raw_result['start_line'],
-            end_line=raw_result['end_line']
+            start_line=start_line,
+            end_line=end_line
         )
