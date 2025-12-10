@@ -351,12 +351,28 @@ def test_index_command_with_parser(tmp_path):
                     mock_parser.parse_file.return_value = mock_entities
                     mock_parser_class.return_value = mock_parser
 
-                    with patch("codesearch.cli.commands.Console"):
-                        result = runner.invoke(app, ["index", str(test_repo), "--force"])
-                        assert result.exit_code == 0
-                        assert "Extracted 2 code entities" in result.stdout
-                        assert "Functions/methods: 2" in result.stdout
-                        mock_parser.parse_file.assert_called_once()
+                    with patch("codesearch.cli.commands.EmbeddingGenerator") as mock_embedder_class:
+                        mock_embedder = Mock()
+                        mock_embedder.get_model_info.return_value = {
+                            "name": "codebert-base",
+                            "dimensions": 768,
+                            "device": "cpu",
+                        }
+                        # Return embeddings for batch
+                        mock_embedder.embed_batch.return_value = [
+                            [0.1] * 768,
+                            [0.2] * 768,
+                        ]
+                        mock_embedder_class.return_value = mock_embedder
+
+                        with patch("codesearch.cli.commands.Console"):
+                            result = runner.invoke(app, ["index", str(test_repo), "--force"])
+                            assert result.exit_code == 0
+                            assert "Extracted 2 code entities" in result.stdout
+                            assert "Functions/methods: 2" in result.stdout
+                            assert "Generated 2 embeddings" in result.stdout
+                            mock_parser.parse_file.assert_called_once()
+                            mock_embedder.embed_batch.assert_called()
 
 
 def test_index_command_parser_syntax_error(tmp_path):
@@ -458,12 +474,26 @@ def test_index_command_parser_with_classes(tmp_path):
                     mock_parser.parse_file.return_value = mock_entities
                     mock_parser_class.return_value = mock_parser
 
-                    with patch("codesearch.cli.commands.Console"):
-                        result = runner.invoke(app, ["index", str(test_repo), "--force"])
-                        assert result.exit_code == 0
-                        assert "Extracted 2 code entities" in result.stdout
-                        assert "Functions/methods: 1" in result.stdout
-                        assert "Classes: 1" in result.stdout
+                    with patch("codesearch.cli.commands.EmbeddingGenerator") as mock_embedder_class:
+                        mock_embedder = Mock()
+                        mock_embedder.get_model_info.return_value = {
+                            "name": "codebert-base",
+                            "dimensions": 768,
+                            "device": "cpu",
+                        }
+                        mock_embedder.embed_batch.return_value = [
+                            [0.1] * 768,
+                            [0.2] * 768,
+                        ]
+                        mock_embedder_class.return_value = mock_embedder
+
+                        with patch("codesearch.cli.commands.Console"):
+                            result = runner.invoke(app, ["index", str(test_repo), "--force"])
+                            assert result.exit_code == 0
+                            assert "Extracted 2 code entities" in result.stdout
+                            assert "Functions/methods: 1" in result.stdout
+                            assert "Classes: 1" in result.stdout
+                            assert "Generated 2 embeddings" in result.stdout
 
 
 def test_index_command_skips_non_python(tmp_path):
@@ -508,3 +538,195 @@ def test_index_command_skips_non_python(tmp_path):
                         # Parser should never be called for non-Python files
                         mock_parser.parse_file.assert_not_called()
                         assert "No code entities found" in result.stdout
+
+
+def test_index_command_embedding_model_load_error(tmp_path):
+    """Test index command handles embedding model load errors gracefully."""
+    from datetime import datetime
+
+    from codesearch.models import FileMetadata, Function
+
+    test_repo = tmp_path / "test_repo"
+    test_repo.mkdir()
+
+    mock_files = [
+        FileMetadata(
+            file_path=str(test_repo / "test.py"),
+            language="python",
+            size_bytes=50,
+            modified_time=datetime.now(),
+            is_ignored=False,
+        ),
+    ]
+
+    mock_entities = [
+        Function(
+            name="test_func",
+            source_code="def test_func(): pass",
+            line_number=1,
+            end_line=1,
+            file_path=str(test_repo / "test.py"),
+        ),
+    ]
+
+    with patch("codesearch.cli.commands.lancedb.connect"):
+        with patch("codesearch.cli.commands.get_db_path", return_value=str(tmp_path / "test.db")):
+            with patch("codesearch.cli.commands.RepositoryScannerImpl") as mock_scanner_class:
+                mock_scanner = Mock()
+                mock_scanner.scan_repository.return_value = mock_files
+                mock_scanner.get_statistics.return_value = {
+                    "total_files": 1,
+                    "by_language": {"python": 1},
+                    "total_size_bytes": 50,
+                }
+                mock_scanner.config = Mock()
+                mock_scanner_class.return_value = mock_scanner
+
+                with patch("codesearch.cli.commands.PythonParser") as mock_parser_class:
+                    mock_parser = Mock()
+                    mock_parser.parse_file.return_value = mock_entities
+                    mock_parser_class.return_value = mock_parser
+
+                    with patch("codesearch.cli.commands.EmbeddingGenerator") as mock_embedder_class:
+                        # Simulate model load failure
+                        mock_embedder_class.side_effect = RuntimeError("Failed to load model")
+
+                        with patch("codesearch.cli.commands.Console"):
+                            result = runner.invoke(app, ["index", str(test_repo), "--force"], catch_exceptions=False)
+                            # Should exit with error code 1
+                            assert result.exit_code == 1
+                            # Error message is in output (mix_stderr happens automatically in test runner)
+                            assert "Failed to load embedding model" in result.output
+
+
+def test_index_command_embedding_batch_error_continues(tmp_path):
+    """Test index command continues processing after batch embedding error."""
+    from datetime import datetime
+
+    from codesearch.models import FileMetadata, Function
+
+    test_repo = tmp_path / "test_repo"
+    test_repo.mkdir()
+
+    mock_files = [
+        FileMetadata(
+            file_path=str(test_repo / "test.py"),
+            language="python",
+            size_bytes=50,
+            modified_time=datetime.now(),
+            is_ignored=False,
+        ),
+    ]
+
+    # Create more entities to test batch processing
+    mock_entities = [
+        Function(
+            name=f"func_{i}",
+            source_code=f"def func_{i}(): pass",
+            line_number=i,
+            end_line=i,
+            file_path=str(test_repo / "test.py"),
+        )
+        for i in range(5)
+    ]
+
+    with patch("codesearch.cli.commands.lancedb.connect"):
+        with patch("codesearch.cli.commands.get_db_path", return_value=str(tmp_path / "test.db")):
+            with patch("codesearch.cli.commands.RepositoryScannerImpl") as mock_scanner_class:
+                mock_scanner = Mock()
+                mock_scanner.scan_repository.return_value = mock_files
+                mock_scanner.get_statistics.return_value = {
+                    "total_files": 1,
+                    "by_language": {"python": 1},
+                    "total_size_bytes": 50,
+                }
+                mock_scanner.config = Mock()
+                mock_scanner_class.return_value = mock_scanner
+
+                with patch("codesearch.cli.commands.PythonParser") as mock_parser_class:
+                    mock_parser = Mock()
+                    mock_parser.parse_file.return_value = mock_entities
+                    mock_parser_class.return_value = mock_parser
+
+                    with patch("codesearch.cli.commands.EmbeddingGenerator") as mock_embedder_class:
+                        mock_embedder = Mock()
+                        mock_embedder.get_model_info.return_value = {
+                            "name": "codebert-base",
+                            "dimensions": 768,
+                            "device": "cpu",
+                        }
+                        # First batch fails, but processing should continue
+                        mock_embedder.embed_batch.side_effect = RuntimeError("Embedding error")
+                        mock_embedder_class.return_value = mock_embedder
+
+                        with patch("codesearch.cli.commands.Console"):
+                            result = runner.invoke(app, ["index", str(test_repo), "--force"])
+                            # Should still exit 0 as it handles errors gracefully
+                            assert result.exit_code == 0
+                            assert "Failed to embed" in result.stdout
+
+
+def test_index_command_embedding_shows_model_info(tmp_path):
+    """Test index command displays model info during embedding."""
+    from datetime import datetime
+
+    from codesearch.models import FileMetadata, Function
+
+    test_repo = tmp_path / "test_repo"
+    test_repo.mkdir()
+
+    mock_files = [
+        FileMetadata(
+            file_path=str(test_repo / "test.py"),
+            language="python",
+            size_bytes=50,
+            modified_time=datetime.now(),
+            is_ignored=False,
+        ),
+    ]
+
+    mock_entities = [
+        Function(
+            name="test_func",
+            source_code="def test_func(): pass",
+            line_number=1,
+            end_line=1,
+            file_path=str(test_repo / "test.py"),
+        ),
+    ]
+
+    with patch("codesearch.cli.commands.lancedb.connect"):
+        with patch("codesearch.cli.commands.get_db_path", return_value=str(tmp_path / "test.db")):
+            with patch("codesearch.cli.commands.RepositoryScannerImpl") as mock_scanner_class:
+                mock_scanner = Mock()
+                mock_scanner.scan_repository.return_value = mock_files
+                mock_scanner.get_statistics.return_value = {
+                    "total_files": 1,
+                    "by_language": {"python": 1},
+                    "total_size_bytes": 50,
+                }
+                mock_scanner.config = Mock()
+                mock_scanner_class.return_value = mock_scanner
+
+                with patch("codesearch.cli.commands.PythonParser") as mock_parser_class:
+                    mock_parser = Mock()
+                    mock_parser.parse_file.return_value = mock_entities
+                    mock_parser_class.return_value = mock_parser
+
+                    with patch("codesearch.cli.commands.EmbeddingGenerator") as mock_embedder_class:
+                        mock_embedder = Mock()
+                        mock_embedder.get_model_info.return_value = {
+                            "name": "codebert-base",
+                            "dimensions": 768,
+                            "device": "cuda",
+                        }
+                        mock_embedder.embed_batch.return_value = [[0.1] * 768]
+                        mock_embedder_class.return_value = mock_embedder
+
+                        with patch("codesearch.cli.commands.Console"):
+                            result = runner.invoke(app, ["index", str(test_repo), "--force"])
+                            assert result.exit_code == 0
+                            assert "Loading embedding model" in result.stdout
+                            assert "codebert-base" in result.stdout
+                            assert "768d" in result.stdout
+                            assert "cuda" in result.stdout

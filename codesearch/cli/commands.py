@@ -10,9 +10,11 @@ from typing import Optional
 import lancedb
 import typer
 from rich.console import Console
+from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 
 from codesearch.cli.config import get_db_path, validate_db_exists
 from codesearch.cli.formatting import format_results_json, format_results_table
+from codesearch.embeddings.generator import EmbeddingGenerator
 from codesearch.indexing.incremental import IncrementalIndexer
 from codesearch.indexing.repository import RepositoryRegistry
 from codesearch.indexing.scanner import RepositoryScannerImpl
@@ -330,8 +332,65 @@ def index(
             typer.echo("⚠️  No code entities found to index")
             raise typer.Exit(0)
 
-        # TODO: Issue #52 - Wire up embedding generation
-        typer.echo("🧮 Generating embeddings...")
+        # Generate embeddings for code entities
+        typer.echo("🧮 Loading embedding model...")
+        try:
+            embedder = EmbeddingGenerator()
+            model_info = embedder.get_model_info()
+            typer.echo(f"   Model: {model_info['name']} ({model_info['dimensions']}d)")
+            typer.echo(f"   Device: {model_info['device']}")
+        except Exception as e:
+            typer.echo(f"❌ Failed to load embedding model: {e}", err=True)
+            typer.echo("   Make sure transformers and torch are installed", err=True)
+            raise typer.Exit(1) from None
+
+        # Prepare texts for batch embedding
+        def get_entity_text(entity: Function | Class) -> str:
+            """Combine entity name, docstring, and source code for embedding."""
+            parts = [entity.name]
+            if entity.docstring:
+                parts.append(entity.docstring)
+            if entity.source_code:
+                parts.append(entity.source_code)
+            return "\n".join(parts)
+
+        # Process embeddings in batches with progress bar
+        batch_size = 32  # Balance between memory usage and speed
+        total_entities = len(all_entities)
+        entities_with_embeddings = 0
+        embedding_errors = 0
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task("🧮 Generating embeddings...", total=total_entities)
+
+            for i in range(0, total_entities, batch_size):
+                batch = all_entities[i:i + batch_size]
+                batch_texts = [get_entity_text(entity) for entity in batch]
+
+                try:
+                    batch_embeddings = embedder.embed_batch(batch_texts)
+
+                    # Assign embeddings to entities
+                    for entity, embedding in zip(batch, batch_embeddings):
+                        entity.embedding = embedding
+                        entities_with_embeddings += 1
+
+                except Exception as e:
+                    # Log error but continue with remaining batches
+                    logger.warning(f"Error embedding batch {i // batch_size}: {e}")
+                    embedding_errors += len(batch)
+
+                progress.update(task, advance=len(batch))
+
+        typer.echo(f"🧮 Generated {entities_with_embeddings} embeddings")
+        if embedding_errors > 0:
+            typer.echo(f"   ⚠️  Failed to embed {embedding_errors} entities")
 
         # TODO: Issue #53 - Wire up database storage
         typer.echo("💾 Storing in database...")
