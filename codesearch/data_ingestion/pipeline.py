@@ -1,7 +1,8 @@
+import hashlib
+import time
 import uuid
 from datetime import datetime
 from typing import List
-import time
 
 from codesearch.models import CodeEntity, CodeRelationship, SearchMetadata
 from codesearch.data_ingestion.models import IngestionResult, IngestionError
@@ -214,16 +215,36 @@ class DataIngestionPipeline:
     def _relationship_to_dict(self, rel: CodeRelationship) -> dict:
         """Convert CodeRelationship to dictionary for database insertion.
 
+        Converts the simpler CodeRelationship from codesearch.models to the full
+        LanceDB schema format expected by the code_relationships table.
+
         Args:
             rel: CodeRelationship to convert
 
         Returns:
-            Dictionary representation of relationship
+            Dictionary representation of relationship matching LanceDB schema
         """
+        from datetime import datetime, timezone
+        import uuid
+
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Generate relationship_id if not provided
+        relationship_id = hashlib.sha256(
+            f"{rel.caller_id}:{rel.callee_id}:{rel.relationship_type}".encode()
+        ).hexdigest()
+
         return {
+            "relationship_id": relationship_id,
             "caller_id": rel.caller_id,
             "callee_id": rel.callee_id,
             "relationship_type": rel.relationship_type,
+            "call_count": 1,
+            "call_context": None,
+            "is_indirect": False,
+            "is_test_only": False,
+            "created_at": now,
+            "updated_at": now,
         }
 
     def ingest_metadata(self, metadata_list: List[SearchMetadata]) -> IngestionResult:
