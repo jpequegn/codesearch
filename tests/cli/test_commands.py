@@ -730,3 +730,347 @@ def test_index_command_embedding_shows_model_info(tmp_path):
                             assert "codebert-base" in result.stdout
                             assert "768d" in result.stdout
                             assert "cuda" in result.stdout
+
+
+# Tests for Issue #53 - Database Storage
+
+
+def test_index_command_stores_entities_in_database(tmp_path):
+    """Test index command stores entities in LanceDB via DataIngestionPipeline."""
+    from datetime import datetime
+
+    from codesearch.data_ingestion.models import IngestionResult
+    from codesearch.models import FileMetadata, Function
+
+    test_repo = tmp_path / "test_repo"
+    test_repo.mkdir()
+
+    mock_files = [
+        FileMetadata(
+            file_path=str(test_repo / "test.py"),
+            language="python",
+            size_bytes=50,
+            modified_time=datetime.now(),
+            is_ignored=False,
+        ),
+    ]
+
+    mock_entities = [
+        Function(
+            name="test_func",
+            source_code="def test_func(): pass",
+            line_number=1,
+            end_line=1,
+            file_path=str(test_repo / "test.py"),
+        ),
+    ]
+
+    mock_result = IngestionResult(
+        inserted_count=1,
+        skipped_count=0,
+        failed_count=0,
+    )
+
+    with patch("codesearch.cli.commands.lancedb.connect") as mock_connect:
+        with patch("codesearch.cli.commands.get_db_path", return_value=str(tmp_path / "test.db")):
+            with patch("codesearch.cli.commands.RepositoryScannerImpl") as mock_scanner_class:
+                mock_scanner = Mock()
+                mock_scanner.scan_repository.return_value = mock_files
+                mock_scanner.get_statistics.return_value = {
+                    "total_files": 1,
+                    "by_language": {"python": 1},
+                    "total_size_bytes": 50,
+                }
+                mock_scanner.config = Mock()
+                mock_scanner_class.return_value = mock_scanner
+
+                with patch("codesearch.cli.commands.PythonParser") as mock_parser_class:
+                    mock_parser = Mock()
+                    mock_parser.parse_file.return_value = mock_entities
+                    mock_parser_class.return_value = mock_parser
+
+                    with patch("codesearch.cli.commands.EmbeddingGenerator") as mock_embedder_class:
+                        mock_embedder = Mock()
+                        mock_embedder.get_model_info.return_value = {
+                            "name": "codebert-base",
+                            "dimensions": 768,
+                            "device": "cpu",
+                        }
+                        mock_embedder.embed_batch.return_value = [[0.1] * 768]
+                        mock_embedder_class.return_value = mock_embedder
+
+                        with patch("codesearch.cli.commands.DataIngestionPipeline") as mock_pipeline_class:
+                            mock_pipeline = Mock()
+                            mock_pipeline.ingest_batch.return_value = mock_result
+                            mock_pipeline_class.return_value = mock_pipeline
+
+                            with patch("codesearch.cli.commands.Console"):
+                                result = runner.invoke(app, ["index", str(test_repo), "--force"])
+                                assert result.exit_code == 0
+                                assert "Stored 1 entities" in result.stdout
+                                mock_pipeline.ingest_batch.assert_called_once()
+
+
+def test_index_command_storage_shows_duplicates(tmp_path):
+    """Test index command shows skipped duplicates count."""
+    from datetime import datetime
+
+    from codesearch.data_ingestion.models import IngestionResult
+    from codesearch.models import FileMetadata, Function
+
+    test_repo = tmp_path / "test_repo"
+    test_repo.mkdir()
+
+    mock_files = [
+        FileMetadata(
+            file_path=str(test_repo / "test.py"),
+            language="python",
+            size_bytes=50,
+            modified_time=datetime.now(),
+            is_ignored=False,
+        ),
+    ]
+
+    mock_entities = [
+        Function(
+            name="test_func",
+            source_code="def test_func(): pass",
+            line_number=1,
+            end_line=1,
+            file_path=str(test_repo / "test.py"),
+        ),
+    ]
+
+    mock_result = IngestionResult(
+        inserted_count=0,
+        skipped_count=1,  # Entity was a duplicate
+        failed_count=0,
+    )
+
+    with patch("codesearch.cli.commands.lancedb.connect"):
+        with patch("codesearch.cli.commands.get_db_path", return_value=str(tmp_path / "test.db")):
+            with patch("codesearch.cli.commands.RepositoryScannerImpl") as mock_scanner_class:
+                mock_scanner = Mock()
+                mock_scanner.scan_repository.return_value = mock_files
+                mock_scanner.get_statistics.return_value = {
+                    "total_files": 1,
+                    "by_language": {"python": 1},
+                    "total_size_bytes": 50,
+                }
+                mock_scanner.config = Mock()
+                mock_scanner_class.return_value = mock_scanner
+
+                with patch("codesearch.cli.commands.PythonParser") as mock_parser_class:
+                    mock_parser = Mock()
+                    mock_parser.parse_file.return_value = mock_entities
+                    mock_parser_class.return_value = mock_parser
+
+                    with patch("codesearch.cli.commands.EmbeddingGenerator") as mock_embedder_class:
+                        mock_embedder = Mock()
+                        mock_embedder.get_model_info.return_value = {
+                            "name": "codebert-base",
+                            "dimensions": 768,
+                            "device": "cpu",
+                        }
+                        mock_embedder.embed_batch.return_value = [[0.1] * 768]
+                        mock_embedder_class.return_value = mock_embedder
+
+                        with patch("codesearch.cli.commands.DataIngestionPipeline") as mock_pipeline_class:
+                            mock_pipeline = Mock()
+                            mock_pipeline.ingest_batch.return_value = mock_result
+                            mock_pipeline_class.return_value = mock_pipeline
+
+                            with patch("codesearch.cli.commands.Console"):
+                                result = runner.invoke(app, ["index", str(test_repo), "--force"])
+                                assert result.exit_code == 0
+                                assert "Skipped 1 duplicates" in result.stdout
+
+
+def test_index_command_storage_error(tmp_path):
+    """Test index command handles database storage errors."""
+    from datetime import datetime
+
+    from codesearch.models import FileMetadata, Function
+
+    test_repo = tmp_path / "test_repo"
+    test_repo.mkdir()
+
+    mock_files = [
+        FileMetadata(
+            file_path=str(test_repo / "test.py"),
+            language="python",
+            size_bytes=50,
+            modified_time=datetime.now(),
+            is_ignored=False,
+        ),
+    ]
+
+    mock_entities = [
+        Function(
+            name="test_func",
+            source_code="def test_func(): pass",
+            line_number=1,
+            end_line=1,
+            file_path=str(test_repo / "test.py"),
+        ),
+    ]
+
+    with patch("codesearch.cli.commands.lancedb.connect"):
+        with patch("codesearch.cli.commands.get_db_path", return_value=str(tmp_path / "test.db")):
+            with patch("codesearch.cli.commands.RepositoryScannerImpl") as mock_scanner_class:
+                mock_scanner = Mock()
+                mock_scanner.scan_repository.return_value = mock_files
+                mock_scanner.get_statistics.return_value = {
+                    "total_files": 1,
+                    "by_language": {"python": 1},
+                    "total_size_bytes": 50,
+                }
+                mock_scanner.config = Mock()
+                mock_scanner_class.return_value = mock_scanner
+
+                with patch("codesearch.cli.commands.PythonParser") as mock_parser_class:
+                    mock_parser = Mock()
+                    mock_parser.parse_file.return_value = mock_entities
+                    mock_parser_class.return_value = mock_parser
+
+                    with patch("codesearch.cli.commands.EmbeddingGenerator") as mock_embedder_class:
+                        mock_embedder = Mock()
+                        mock_embedder.get_model_info.return_value = {
+                            "name": "codebert-base",
+                            "dimensions": 768,
+                            "device": "cpu",
+                        }
+                        mock_embedder.embed_batch.return_value = [[0.1] * 768]
+                        mock_embedder_class.return_value = mock_embedder
+
+                        with patch("codesearch.cli.commands.DataIngestionPipeline") as mock_pipeline_class:
+                            mock_pipeline = Mock()
+                            mock_pipeline.ingest_batch.side_effect = RuntimeError("Database error")
+                            mock_pipeline_class.return_value = mock_pipeline
+
+                            with patch("codesearch.cli.commands.Console"):
+                                result = runner.invoke(app, ["index", str(test_repo), "--force"])
+                                assert result.exit_code == 1
+                                assert "Database storage error" in result.output
+
+
+def test_index_command_converts_entities_correctly(tmp_path):
+    """Test that entities are converted to CodeEntity format correctly."""
+    from datetime import datetime
+
+    from codesearch.data_ingestion.models import IngestionResult
+    from codesearch.models import Class, FileMetadata, Function
+
+    test_repo = tmp_path / "test_repo"
+    test_repo.mkdir()
+
+    mock_files = [
+        FileMetadata(
+            file_path=str(test_repo / "test.py"),
+            language="python",
+            size_bytes=50,
+            modified_time=datetime.now(),
+            is_ignored=False,
+        ),
+    ]
+
+    # Test with both Function and Class entities
+    mock_entities = [
+        Function(
+            name="public_func",
+            source_code="def public_func(): pass",
+            line_number=1,
+            end_line=1,
+            file_path=str(test_repo / "test.py"),
+        ),
+        Function(
+            name="_protected_func",
+            source_code="def _protected_func(): pass",
+            line_number=5,
+            end_line=5,
+            file_path=str(test_repo / "test.py"),
+        ),
+        Function(
+            name="__private_func",
+            source_code="def __private_func(): pass",
+            line_number=10,
+            end_line=10,
+            file_path=str(test_repo / "test.py"),
+        ),
+        Class(
+            name="TestClass",
+            source_code="class TestClass: pass",
+            line_number=15,
+            end_line=15,
+            file_path=str(test_repo / "test.py"),
+        ),
+    ]
+
+    mock_result = IngestionResult(
+        inserted_count=4,
+        skipped_count=0,
+        failed_count=0,
+    )
+
+    captured_entities = []
+
+    def capture_ingest(entities):
+        captured_entities.extend(entities)
+        return mock_result
+
+    with patch("codesearch.cli.commands.lancedb.connect"):
+        with patch("codesearch.cli.commands.get_db_path", return_value=str(tmp_path / "test.db")):
+            with patch("codesearch.cli.commands.RepositoryScannerImpl") as mock_scanner_class:
+                mock_scanner = Mock()
+                mock_scanner.scan_repository.return_value = mock_files
+                mock_scanner.get_statistics.return_value = {
+                    "total_files": 1,
+                    "by_language": {"python": 1},
+                    "total_size_bytes": 50,
+                }
+                mock_scanner.config = Mock()
+                mock_scanner_class.return_value = mock_scanner
+
+                with patch("codesearch.cli.commands.PythonParser") as mock_parser_class:
+                    mock_parser = Mock()
+                    mock_parser.parse_file.return_value = mock_entities
+                    mock_parser_class.return_value = mock_parser
+
+                    with patch("codesearch.cli.commands.EmbeddingGenerator") as mock_embedder_class:
+                        mock_embedder = Mock()
+                        mock_embedder.get_model_info.return_value = {
+                            "name": "codebert-base",
+                            "dimensions": 768,
+                            "device": "cpu",
+                        }
+                        mock_embedder.embed_batch.return_value = [[0.1] * 768 for _ in range(4)]
+                        mock_embedder_class.return_value = mock_embedder
+
+                        with patch("codesearch.cli.commands.DataIngestionPipeline") as mock_pipeline_class:
+                            mock_pipeline = Mock()
+                            mock_pipeline.ingest_batch.side_effect = capture_ingest
+                            mock_pipeline_class.return_value = mock_pipeline
+
+                            with patch("codesearch.cli.commands.Console"):
+                                result = runner.invoke(app, ["index", str(test_repo), "--force"])
+                                assert result.exit_code == 0
+
+                                # Verify entities were converted correctly
+                                assert len(captured_entities) == 4
+
+                                # Check entity types
+                                entity_types = [e.entity_type for e in captured_entities]
+                                assert "function" in entity_types
+                                assert "class" in entity_types
+
+                                # Check visibility
+                                visibilities = {e.name: e.visibility for e in captured_entities}
+                                assert visibilities["public_func"] == "public"
+                                assert visibilities["_protected_func"] == "protected"
+                                assert visibilities["__private_func"] == "private"
+                                assert visibilities["TestClass"] == "public"
+
+                                # Verify all have entity_id
+                                for entity in captured_entities:
+                                    assert entity.entity_id
+                                    assert len(entity.entity_id) == 64  # SHA256 hex length

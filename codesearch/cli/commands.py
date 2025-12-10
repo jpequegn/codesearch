@@ -3,9 +3,10 @@
 Core commands for indexing, searching, and analyzing code.
 """
 
+import hashlib
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import lancedb
 import typer
@@ -14,12 +15,13 @@ from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn
 
 from codesearch.cli.config import get_db_path, validate_db_exists
 from codesearch.cli.formatting import format_results_json, format_results_table
+from codesearch.data_ingestion.pipeline import DataIngestionPipeline
 from codesearch.embeddings.generator import EmbeddingGenerator
 from codesearch.indexing.incremental import IncrementalIndexer
 from codesearch.indexing.repository import RepositoryRegistry
 from codesearch.indexing.scanner import RepositoryScannerImpl
 from codesearch.lancedb import DatabaseBackupManager, DatabaseStatistics
-from codesearch.models import Class, Function
+from codesearch.models import Class, CodeEntity, Function
 from codesearch.parsers.python_parser import PythonParser
 from codesearch.query import QueryEngine
 from codesearch.query.filters import RepositoryFilter
@@ -212,6 +214,64 @@ def dependencies(
         raise typer.Exit(1)
 
 
+def _to_code_entity(
+    entity: Union[Function, Class],
+    repository: str,
+) -> CodeEntity:
+    """Convert a Function or Class to a CodeEntity for database storage.
+
+    Args:
+        entity: Function or Class object with embedding
+        repository: Repository name for the entity
+
+    Returns:
+        CodeEntity ready for database insertion
+    """
+    # Generate unique entity ID from content hash
+    content_hash = hashlib.sha256(
+        f"{entity.file_path}:{entity.line_number}:{entity.name}".encode()
+    ).hexdigest()
+
+    # Determine entity type
+    if isinstance(entity, Class):
+        entity_type = "class"
+    elif isinstance(entity, Function) and entity.is_method:
+        entity_type = "method"
+    else:
+        entity_type = "function"
+
+    # Determine visibility based on naming conventions
+    if entity.name.startswith("__") and not entity.name.endswith("__"):
+        visibility = "private"
+    elif entity.name.startswith("_"):
+        visibility = "protected"
+    else:
+        visibility = "public"
+
+    # Get embedding (default to empty list if not generated)
+    code_vector = entity.embedding if entity.embedding else []
+
+    # Generate source hash for incremental indexing
+    source_hash = hashlib.sha256(
+        (entity.source_code or "").encode()
+    ).hexdigest()
+
+    return CodeEntity(
+        entity_id=content_hash,
+        name=entity.name,
+        code_text=entity.source_code or "",
+        code_vector=code_vector,
+        language=entity.language,
+        entity_type=entity_type,
+        repository=repository,
+        file_path=entity.file_path,
+        start_line=entity.line_number,
+        end_line=entity.end_line,
+        visibility=visibility,
+        source_hash=source_hash,
+    )
+
+
 def index(
     path: str = typer.Argument(".", help="Path to codebase or file"),
     force: bool = typer.Option(False, "--force", "-f", help="Force re-index even if exists"),
@@ -392,8 +452,37 @@ def index(
         if embedding_errors > 0:
             typer.echo(f"   ⚠️  Failed to embed {embedding_errors} entities")
 
-        # TODO: Issue #53 - Wire up database storage
+        # Store entities in database using DataIngestionPipeline
         typer.echo("💾 Storing in database...")
+
+        # Convert all entities to CodeEntity format
+        repo_name = path_obj.name
+        code_entities = []
+        for entity in all_entities:
+            try:
+                code_entity = _to_code_entity(entity, repo_name)
+                code_entities.append(code_entity)
+            except Exception as e:
+                logger.warning(f"Error converting entity {entity.name}: {e}")
+
+        if not code_entities:
+            typer.echo("❌ No entities to store", err=True)
+            raise typer.Exit(1) from None
+
+        # Initialize pipeline and ingest entities
+        try:
+            client = lancedb.connect(db_path)
+            pipeline = DataIngestionPipeline(client)
+            result = pipeline.ingest_batch(code_entities)
+
+            typer.echo(f"💾 Stored {result.inserted_count} entities")
+            if result.skipped_count > 0:
+                typer.echo(f"   ⏭️  Skipped {result.skipped_count} duplicates")
+            if result.failed_count > 0:
+                typer.echo(f"   ⚠️  {result.failed_count} storage errors")
+        except Exception as e:
+            typer.echo(f"❌ Database storage error: {e}", err=True)
+            raise typer.Exit(1) from None
 
         typer.echo("\n✅ Indexing complete!")
         typer.echo(f"Database saved to {db_path}")
