@@ -150,14 +150,117 @@ def test_dependencies_no_database():
             assert result.exit_code == 2
 
 
-def test_index_command():
-    """Test index command."""
+def test_index_command_with_scanner(tmp_path):
+    """Test index command with scanner integration."""
+    from codesearch.models import FileMetadata
+    from datetime import datetime
+
+    # Create a real temp directory
+    test_repo = tmp_path / "test_repo"
+    test_repo.mkdir()
+
+    mock_files = [
+        FileMetadata(
+            file_path=str(test_repo / "test.py"),
+            language="python",
+            size_bytes=100,
+            modified_time=datetime.now(),
+            is_ignored=False,
+        ),
+        FileMetadata(
+            file_path=str(test_repo / "utils.py"),
+            language="python",
+            size_bytes=200,
+            modified_time=datetime.now(),
+            is_ignored=False,
+        ),
+    ]
+
     with patch("codesearch.cli.commands.lancedb.connect"):
-        with patch("codesearch.cli.commands.get_db_path", return_value="/tmp/test.db"):
-            with patch("os.makedirs"):
-                result = runner.invoke(app, ["index", "/tmp/test_repo"])
-                assert result.exit_code == 0
-                assert "Indexing" in result.stdout
+        with patch("codesearch.cli.commands.get_db_path", return_value=str(tmp_path / "test.db")):
+            with patch("codesearch.cli.commands.RepositoryScannerImpl") as mock_scanner_class:
+                mock_scanner = Mock()
+                mock_scanner.scan_repository.return_value = mock_files
+                mock_scanner.get_statistics.return_value = {
+                    "total_files": 2,
+                    "by_language": {"python": 2},
+                    "total_size_bytes": 300,
+                }
+                mock_scanner.config = Mock()
+                mock_scanner_class.return_value = mock_scanner
+
+                with patch("codesearch.cli.commands.Console"):
+                    result = runner.invoke(app, ["index", str(test_repo), "--force"])
+                    assert result.exit_code == 0
+                    assert "Found 2 files to index" in result.stdout
+                    assert "python: 2 files" in result.stdout
+                    mock_scanner.scan_repository.assert_called_once()
+
+
+def test_index_command_no_files_found(tmp_path):
+    """Test index command when no files are found."""
+    # Create a real temp directory
+    empty_repo = tmp_path / "empty_repo"
+    empty_repo.mkdir()
+
+    with patch("codesearch.cli.commands.lancedb.connect"):
+        with patch("codesearch.cli.commands.get_db_path", return_value=str(tmp_path / "test.db")):
+            with patch("codesearch.cli.commands.RepositoryScannerImpl") as mock_scanner_class:
+                mock_scanner = Mock()
+                mock_scanner.scan_repository.return_value = []
+                mock_scanner.get_statistics.return_value = {
+                    "total_files": 0,
+                    "by_language": {},
+                    "total_size_bytes": 0,
+                }
+                mock_scanner.config = Mock()
+                mock_scanner_class.return_value = mock_scanner
+
+                with patch("codesearch.cli.commands.Console"):
+                    result = runner.invoke(app, ["index", str(empty_repo), "--force"])
+                    assert result.exit_code == 0
+                    assert "No files found" in result.stdout
+
+
+def test_index_command_with_language_filter(tmp_path):
+    """Test index command with language filter."""
+    from codesearch.models import FileMetadata
+    from datetime import datetime
+
+    # Create a real temp directory
+    test_repo = tmp_path / "test_repo"
+    test_repo.mkdir()
+
+    mock_files = [
+        FileMetadata(
+            file_path=str(test_repo / "test.py"),
+            language="python",
+            size_bytes=100,
+            modified_time=datetime.now(),
+            is_ignored=False,
+        ),
+    ]
+
+    with patch("codesearch.cli.commands.lancedb.connect"):
+        with patch("codesearch.cli.commands.get_db_path", return_value=str(tmp_path / "test.db")):
+            with patch("codesearch.cli.commands.RepositoryScannerImpl") as mock_scanner_class:
+                mock_scanner = Mock()
+                mock_scanner.scan_repository.return_value = mock_files
+                mock_scanner.get_statistics.return_value = {
+                    "total_files": 1,
+                    "by_language": {"python": 1},
+                    "total_size_bytes": 100,
+                }
+                mock_scanner.config = Mock()
+                mock_scanner_class.return_value = mock_scanner
+
+                with patch("codesearch.cli.commands.Console"):
+                    result = runner.invoke(
+                        app, ["index", str(test_repo), "--force", "--language", "python"]
+                    )
+                    assert result.exit_code == 0
+                    # Verify language filter was applied
+                    assert mock_scanner.config.supported_languages == {"python"}
 
 
 def test_refactor_dupes_command():

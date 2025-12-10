@@ -3,22 +3,21 @@
 Core commands for indexing, searching, and analyzing code.
 """
 
-import typer
-import lancedb
-import os
-from pathlib import Path
-from typing import Optional, List
 import logging
+from pathlib import Path
+from typing import Optional
 
+import lancedb
+import typer
 from rich.console import Console
 
-from codesearch.query import QueryEngine
-from codesearch.lancedb import DatabaseStatistics, DatabaseBackupManager
-from codesearch.cli.config import get_db_path, validate_db_exists, get_config
+from codesearch.cli.config import get_db_path, validate_db_exists
 from codesearch.cli.formatting import format_results_json, format_results_table
 from codesearch.indexing.incremental import IncrementalIndexer
-from codesearch.indexing.repository import RepositoryRegistry, NamespaceManager
+from codesearch.indexing.repository import RepositoryRegistry
 from codesearch.indexing.scanner import RepositoryScannerImpl
+from codesearch.lancedb import DatabaseBackupManager, DatabaseStatistics
+from codesearch.query import QueryEngine
 from codesearch.query.filters import RepositoryFilter
 
 logger = logging.getLogger(__name__)
@@ -263,7 +262,7 @@ def index(
         if incremental:
             indexer = IncrementalIndexer()
             typer.echo(f"📊 Currently indexed: {indexer.get_indexed_count()} files")
-            typer.echo(f"🔄 Incremental update mode enabled")
+            typer.echo("🔄 Incremental update mode enabled")
 
         # Scan repository for files
         console = Console()
@@ -290,13 +289,13 @@ def index(
             raise typer.Exit(0)
 
         # TODO: Issue #51 - Wire up Python parser
-        typer.echo(f"🔗 Extracting code entities...")
+        typer.echo("🔗 Extracting code entities...")
 
         # TODO: Issue #52 - Wire up embedding generation
-        typer.echo(f"🧮 Generating embeddings...")
+        typer.echo("🧮 Generating embeddings...")
 
         # TODO: Issue #53 - Wire up database storage
-        typer.echo(f"💾 Storing in database...")
+        typer.echo("💾 Storing in database...")
 
         typer.echo("\n✅ Indexing complete!")
         typer.echo(f"Database saved to {db_path}")
@@ -306,7 +305,7 @@ def index(
             client = lancedb.connect(db_path)
             stats = DatabaseStatistics(db_path_obj)
             db_stats = stats.get_database_stats()
-            typer.echo(f"\n📊 Database Statistics:")
+            typer.echo("\n📊 Database Statistics:")
             typer.echo(f"  Total rows: {db_stats.get('total_rows', 0)}")
             typer.echo(f"  Database size: {db_stats.get('database_size', 'unknown')}")
         except:
