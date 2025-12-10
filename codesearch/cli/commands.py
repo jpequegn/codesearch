@@ -17,6 +17,8 @@ from codesearch.indexing.incremental import IncrementalIndexer
 from codesearch.indexing.repository import RepositoryRegistry
 from codesearch.indexing.scanner import RepositoryScannerImpl
 from codesearch.lancedb import DatabaseBackupManager, DatabaseStatistics
+from codesearch.models import Class, Function
+from codesearch.parsers.python_parser import PythonParser
 from codesearch.query import QueryEngine
 from codesearch.query.filters import RepositoryFilter
 
@@ -288,8 +290,45 @@ def index(
             typer.echo("   Check that the path contains supported files (.py, .js, .ts, .go)")
             raise typer.Exit(0)
 
-        # TODO: Issue #51 - Wire up Python parser
-        typer.echo("🔗 Extracting code entities...")
+        # Parse files to extract code entities
+        parser = PythonParser()
+        all_entities: list[Function | Class] = []
+        parse_errors: list[tuple[str, str]] = []
+
+        with console.status("[bold blue]🔗 Extracting code entities...", spinner="dots"):
+            for file_metadata in files:
+                if file_metadata.language != "python":
+                    continue  # Only Python parser available for now
+
+                try:
+                    entities = parser.parse_file(file_metadata.file_path)
+                    all_entities.extend(entities)
+                except SyntaxError as e:
+                    parse_errors.append((file_metadata.file_path, f"Syntax error: {e}"))
+                except IOError as e:
+                    parse_errors.append((file_metadata.file_path, f"IO error: {e}"))
+                except Exception as e:
+                    parse_errors.append((file_metadata.file_path, f"Error: {e}"))
+
+        # Count by type
+        function_count = sum(1 for e in all_entities if isinstance(e, Function))
+        class_count = sum(1 for e in all_entities if isinstance(e, Class))
+
+        typer.echo(f"🔗 Extracted {len(all_entities)} code entities")
+        typer.echo(f"   - Functions/methods: {function_count}")
+        typer.echo(f"   - Classes: {class_count}")
+
+        # Report parse errors
+        if parse_errors:
+            typer.echo(f"   ⚠️  Skipped {len(parse_errors)} files with errors")
+            if len(parse_errors) <= 5:
+                for file_path, error in parse_errors:
+                    rel_path = Path(file_path).relative_to(path_obj) if file_path.startswith(str(path_obj)) else file_path
+                    typer.echo(f"      - {rel_path}: {error}")
+
+        if not all_entities:
+            typer.echo("⚠️  No code entities found to index")
+            raise typer.Exit(0)
 
         # TODO: Issue #52 - Wire up embedding generation
         typer.echo("🧮 Generating embeddings...")
@@ -302,13 +341,13 @@ def index(
 
         # Show statistics
         try:
-            client = lancedb.connect(db_path)
+            lancedb.connect(db_path)  # Verify connection works
             stats = DatabaseStatistics(db_path_obj)
             db_stats = stats.get_database_stats()
             typer.echo("\n📊 Database Statistics:")
             typer.echo(f"  Total rows: {db_stats.get('total_rows', 0)}")
             typer.echo(f"  Database size: {db_stats.get('database_size', 'unknown')}")
-        except:
+        except Exception:
             pass  # Stats not critical
 
     except typer.Exit:
