@@ -103,6 +103,7 @@ class TestModelRegistry:
         """Test that CodeT5+ models are in the registry."""
         assert "codet5p-110m" in MODEL_REGISTRY
         assert "codet5p-220m" in MODEL_REGISTRY
+        assert "codet5p-770m" in MODEL_REGISTRY
 
     def test_get_available_models(self):
         """Test getting list of available models."""
@@ -250,3 +251,50 @@ class TestUniXcoderDefault:
         codebert = MODEL_REGISTRY["codebert"]
         assert unixcoder.dimensions == codebert.dimensions
         assert unixcoder.max_length == codebert.max_length
+
+
+class TestCodeT5PlusModels:
+    """Tests for CodeT5+ model configurations."""
+
+    def test_codet5p_110m_config(self):
+        """Test CodeT5+-110M has correct configuration."""
+        config = MODEL_REGISTRY["codet5p-110m"]
+        assert config.model_name == "codet5p-110m"
+        assert config.model_path == "Salesforce/codet5p-110m-embedding"
+        assert config.dimensions == 256  # Smaller embeddings
+        assert config.max_length == 512
+        assert config.pooling == PoolingStrategy.MEAN
+
+    def test_codet5p_220m_config(self):
+        """Test CodeT5+-220M has correct configuration."""
+        config = MODEL_REGISTRY["codet5p-220m"]
+        assert config.model_name == "codet5p-220m"
+        assert config.model_path == "Salesforce/codet5p-220m-embedding"
+        assert config.dimensions == 768
+        assert config.max_length == 512
+
+    def test_codet5p_770m_config(self):
+        """Test CodeT5+-770M has correct configuration."""
+        config = MODEL_REGISTRY["codet5p-770m"]
+        assert config.model_name == "codet5p-770m"
+        assert config.model_path == "Salesforce/codet5p-770m"
+        assert config.dimensions == 1024  # Larger embeddings
+        assert config.max_length == 512
+
+    def test_codet5p_110m_smaller_dimensions(self):
+        """Test CodeT5+-110M has smaller embedding dimensions for efficiency."""
+        config_110m = MODEL_REGISTRY["codet5p-110m"]
+        config_codebert = MODEL_REGISTRY["codebert"]
+        # 110M uses 256 dims vs 768 for CodeBERT (3x smaller)
+        assert config_110m.dimensions < config_codebert.dimensions
+        assert config_110m.dimensions == 256
+
+    def test_codet5p_models_via_get_model_config(self):
+        """Test that CodeT5+ models can be retrieved via get_model_config."""
+        config_110m = get_model_config("codet5p-110m")
+        config_220m = get_model_config("codet5p-220m")
+        config_770m = get_model_config("codet5p-770m")
+
+        assert config_110m.dimensions == 256
+        assert config_220m.dimensions == 768
+        assert config_770m.dimensions == 1024

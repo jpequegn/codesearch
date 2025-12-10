@@ -1,6 +1,7 @@
 """LanceDB module for semantic code search."""
 
 from codesearch.lancedb.models import (
+    DEFAULT_EMBEDDING_DIMENSION,
     EntityType,
     Visibility,
     RelationshipType,
@@ -17,6 +18,8 @@ from codesearch.lancedb.statistics import DatabaseStatistics
 from codesearch.lancedb.optimization import DatabaseOptimizer
 
 __all__ = [
+    # Constants
+    "DEFAULT_EMBEDDING_DIMENSION",
     # Models
     "EntityType",
     "Visibility",

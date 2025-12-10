@@ -3,7 +3,7 @@
 from typing import List, Optional, Union
 
 import torch
-from transformers import AutoModel, AutoTokenizer
+from transformers import AutoModel, AutoTokenizer, T5EncoderModel
 
 from codesearch.embeddings.config import (
     EmbeddingConfig,
@@ -55,7 +55,16 @@ class EmbeddingGenerator:
 
         # Load model and tokenizer from HuggingFace
         self.tokenizer = AutoTokenizer.from_pretrained(self.config.model_path)
-        self.model = AutoModel.from_pretrained(self.config.model_path).to(self.device)
+
+        # CodeT5+ 770M is an encoder-decoder model, use encoder only for embeddings
+        if self.config.model_name == "codet5p-770m":
+            self.model = T5EncoderModel.from_pretrained(
+                self.config.model_path
+            ).to(self.device)
+        else:
+            self.model = AutoModel.from_pretrained(
+                self.config.model_path
+            ).to(self.device)
 
         # UniXcoder-specific: add <encoder-only> token for encoder-only mode
         # This token signals the model to operate in embedding mode

@@ -7,8 +7,9 @@ from typing import List, Optional
 
 import pyarrow as pa
 
-# Vector dimension for CodeBERT embeddings
-EMBEDDING_DIMENSION = 768
+# Default vector dimension (768 for most models like CodeBERT, UniXcoder)
+# Can be overridden for models with different output dimensions (e.g., 256 for CodeT5+-110M)
+DEFAULT_EMBEDDING_DIMENSION = 768
 
 
 # Enums for categorical fields
@@ -207,8 +208,13 @@ class SearchMetadata:
 # PyArrow Schemas for LanceDB table creation
 # These define the exact schema for each table including vector columns
 
-def get_code_entities_schema() -> pa.Schema:
+def get_code_entities_schema(dimensions: int = DEFAULT_EMBEDDING_DIMENSION) -> pa.Schema:
     """Get PyArrow schema for code_entities table.
+
+    Args:
+        dimensions: Vector dimensions for embeddings (default: 768).
+                   Use 256 for CodeT5+-110M, 768 for most models,
+                   1024 for CodeT5+-770M.
 
     Returns:
         PyArrow schema with vector column for similarity search.
@@ -223,7 +229,7 @@ def get_code_entities_schema() -> pa.Schema:
         pa.field("full_qualified_name", pa.string(), nullable=False),
         pa.field("code_text", pa.string(), nullable=False),
         pa.field("docstring", pa.string(), nullable=True),
-        pa.field("code_vector", pa.list_(pa.float32(), EMBEDDING_DIMENSION), nullable=False),
+        pa.field("code_vector", pa.list_(pa.float32(), dimensions), nullable=False),
         pa.field("visibility", pa.string(), nullable=False),
         pa.field("class_name", pa.string(), nullable=True),
         pa.field("complexity", pa.int32(), nullable=False),

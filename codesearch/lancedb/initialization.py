@@ -9,6 +9,7 @@ from typing import Dict, Optional
 import lancedb
 
 from codesearch.lancedb.models import (
+    DEFAULT_EMBEDDING_DIMENSION,
     get_code_entities_schema,
     get_code_relationships_schema,
     get_search_metadata_schema,
@@ -57,15 +58,23 @@ class DatabaseInitializer:
         },
     }
 
-    def __init__(self, db_path: Optional[Path] = None) -> None:
+    def __init__(
+        self,
+        db_path: Optional[Path] = None,
+        embedding_dimensions: int = DEFAULT_EMBEDDING_DIMENSION,
+    ) -> None:
         """Initialize database initializer.
 
         Args:
             db_path: Path to LanceDB directory (default: .lancedb/)
+            embedding_dimensions: Vector dimensions for embeddings (default: 768).
+                                 Use 256 for CodeT5+-110M, 768 for most models,
+                                 1024 for CodeT5+-770M.
         """
         self.db_path = db_path or Path(".lancedb")
         self.db_path.mkdir(parents=True, exist_ok=True)
         self.config_file = self.db_path / "db_config.json"
+        self.embedding_dimensions = embedding_dimensions
 
     def initialize(self) -> bool:
         """Initialize database with schema and configuration.
@@ -107,11 +116,14 @@ class DatabaseInitializer:
         """
         existing_tables = set(db.table_names())
 
-        # Create code_entities table
+        # Create code_entities table with configured embedding dimensions
         if TABLE_CODE_ENTITIES not in existing_tables:
-            schema = get_code_entities_schema()
+            schema = get_code_entities_schema(dimensions=self.embedding_dimensions)
             db.create_table(TABLE_CODE_ENTITIES, schema=schema)
-            logger.info(f"Created table: {TABLE_CODE_ENTITIES}")
+            logger.info(
+                f"Created table: {TABLE_CODE_ENTITIES} "
+                f"(embedding_dim={self.embedding_dimensions})"
+            )
 
         # Create code_relationships table
         if TABLE_CODE_RELATIONSHIPS not in existing_tables:
@@ -275,6 +287,7 @@ class DatabaseInitializer:
         """Write database configuration to file."""
         config = self.DEFAULT_CONFIG.copy()
         config["created_at"] = datetime.now(timezone.utc).isoformat()
+        config["embedding_dimensions"] = self.embedding_dimensions
 
         try:
             with open(self.config_file, "w") as f:
@@ -296,3 +309,18 @@ class DatabaseInitializer:
         """
         with open(self.config_file, "r") as f:
             return json.load(f)
+
+    def get_embedding_dimensions(self) -> int:
+        """Get the embedding dimensions configured for this database.
+
+        Returns:
+            Configured embedding dimensions, or default if not set.
+        """
+        if not self.is_initialized():
+            return self.embedding_dimensions
+
+        try:
+            config = self._read_config()
+            return config.get("embedding_dimensions", DEFAULT_EMBEDDING_DIMENSION)
+        except Exception:
+            return DEFAULT_EMBEDDING_DIMENSION
