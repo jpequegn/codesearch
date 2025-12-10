@@ -159,12 +159,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for comprehensive design docume
 
 For detailed installation instructions, see [docs/INSTALLATION.md](docs/INSTALLATION.md).
 
-**Quick install:**
-```bash
-pip install codesearch
-```
-
-**Development install:**
+**Install from source:**
 ```bash
 git clone https://github.com/jpequegn/codesearch.git
 cd codesearch
