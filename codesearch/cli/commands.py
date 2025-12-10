@@ -99,34 +99,49 @@ def find_similar(
         client = lancedb.connect(db_path)
         engine = QueryEngine(client)
 
-        # Try to get entity vector from database
+        # Find the entity by name in the database
         try:
             entities_table = client.open_table("code_entities")
 
-            # Use LanceDB where clause to find entity by name directly
-            # Escape single quotes in entity name for SQL safety
+            # Search for entity by name using LanceDB where clause
+            # Build filter string - escape single quotes in entity name
             safe_name = entity_name.replace("'", "''")
-            matching = entities_table.search().where(f"name = '{safe_name}'").limit(10).to_list()
+            filter_expr = f"name = '{safe_name}'"
+            if language:
+                safe_language = language.replace("'", "''")
+                filter_expr += f" AND language = '{safe_language}'"
 
-            if not matching:
+            # Query all entities matching the name
+            entity_results = (
+                entities_table.search()
+                .where(filter_expr, prefilter=True)
+                .limit(1)
+                .to_list()
+            )
+
+            if not entity_results:
                 typer.echo(f"❌ Entity '{entity_name}' not found in database")
                 raise typer.Exit(3)
 
-            entity = matching[0]
+            entity = entity_results[0]
+            entity_id = entity.get("entity_id")
+
             if "code_vector" not in entity or not entity["code_vector"]:
                 typer.echo(f"⚠️  Entity '{entity_name}' has no embedding vector")
                 raise typer.Exit(2)
 
-            # Search similar vectors
+            # Search for similar vectors using the entity's embedding
             typer.echo(f"🔍 Finding similar code to '{entity_name}'...")
             similar_results = engine.search_vector(
                 entity["code_vector"],
-                limit=limit + 1
+                limit=limit + 1  # +1 to account for excluding self
             )
 
             # Filter out the original entity by entity_id (more reliable than name)
-            original_entity_id = entity.get("entity_id")
-            filtered = [r for r in similar_results if r.entity_id != original_entity_id][:limit]
+            filtered = [r for r in similar_results if r.entity_id != entity_id][:limit]
+
+            # Apply similarity threshold
+            filtered = [r for r in filtered if r.similarity_score >= threshold]
 
             if not filtered:
                 typer.echo("❌ No similar results found")
@@ -140,13 +155,13 @@ def find_similar(
         except Exception as search_error:
             typer.echo(f"⚠️  Could not perform similarity search: {search_error}", err=True)
             typer.echo("Make sure entities have been indexed with embeddings", err=True)
-            raise typer.Exit(1)
+            raise typer.Exit(1) from None
 
     except typer.Exit:
         raise
     except Exception as e:
         typer.echo(f"❌ Error: {str(e)}", err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
 
 def dependencies(
