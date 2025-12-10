@@ -16,6 +16,7 @@ from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn
 from codesearch.cli.config import get_db_path, validate_db_exists
 from codesearch.cli.formatting import format_results_json, format_results_table
 from codesearch.data_ingestion.pipeline import DataIngestionPipeline
+from codesearch.embeddings.config import get_available_models
 from codesearch.embeddings.generator import EmbeddingGenerator
 from codesearch.indexing.incremental import IncrementalIndexer
 from codesearch.indexing.repository import RepositoryRegistry
@@ -380,7 +381,15 @@ def index(
     force: bool = typer.Option(False, "--force", "-f", help="Force re-index even if exists"),
     language: Optional[str] = typer.Option(None, "--language", "-L", help="Language filter"),
     backup: bool = typer.Option(True, "--backup/--no-backup", help="Backup existing database"),
-    incremental: bool = typer.Option(False, "--incremental", "-i", help="Use incremental indexing (only updated files)"),
+    incremental: bool = typer.Option(
+        False, "--incremental", "-i", help="Use incremental indexing (only updated files)"
+    ),
+    model: Optional[str] = typer.Option(
+        None,
+        "--model",
+        "-m",
+        help=f"Embedding model ({', '.join(get_available_models())})",
+    ),
 ) -> None:
     """Index a codebase for semantic search.
 
@@ -393,6 +402,7 @@ def index(
         $ codesearch index . --language python
         $ codesearch index --force  # Re-index current directory
         $ codesearch index --incremental  # Only update changed files
+        $ codesearch index --model unixcoder  # Use UniXcoder model
     """
     try:
         path_obj = Path(path).resolve()
@@ -504,10 +514,18 @@ def index(
         # Generate embeddings for code entities
         typer.echo("🧮 Loading embedding model...")
         try:
-            embedder = EmbeddingGenerator()
+            # Pass model name if specified via --model flag
+            # Otherwise EmbeddingGenerator will use env vars, config file, or defaults
+            embedder = EmbeddingGenerator(model_config=model)
             model_info = embedder.get_model_info()
             typer.echo(f"   Model: {model_info['name']} ({model_info['dimensions']}d)")
+            typer.echo(f"   Path: {model_info['model_path']}")
             typer.echo(f"   Device: {model_info['device']}")
+        except ValueError as e:
+            # Invalid model name
+            typer.echo(f"❌ {e}", err=True)
+            typer.echo(f"   Available models: {', '.join(get_available_models())}", err=True)
+            raise typer.Exit(1) from None
         except Exception as e:
             typer.echo(f"❌ Failed to load embedding model: {e}", err=True)
             typer.echo("   Make sure transformers and torch are installed", err=True)
