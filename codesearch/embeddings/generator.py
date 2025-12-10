@@ -21,7 +21,7 @@ class EmbeddingGenerator:
     - Explicit EmbeddingConfig or model name
     - Environment variables (CODESEARCH_MODEL, CODESEARCH_EMBEDDING_DEVICE)
     - Configuration file (~/.codesearch/config.yaml)
-    - Default (CodeBERT)
+    - Default (UniXcoder)
     """
 
     def __init__(
@@ -57,8 +57,27 @@ class EmbeddingGenerator:
         self.tokenizer = AutoTokenizer.from_pretrained(self.config.model_path)
         self.model = AutoModel.from_pretrained(self.config.model_path).to(self.device)
 
+        # UniXcoder-specific: add <encoder-only> token for encoder-only mode
+        # This token signals the model to operate in embedding mode
+        if self.config.model_name == "unixcoder":
+            self._setup_unixcoder()
+
         # Set to eval mode (no gradients)
         self.model.eval()
+
+    def _setup_unixcoder(self) -> None:
+        """Configure tokenizer for UniXcoder encoder-only mode.
+
+        UniXcoder uses a special <encoder-only> token to indicate that
+        the model should operate in encoder-only mode for embeddings.
+        This produces better quality embeddings than the default mode.
+        """
+        # Add the encoder-only token if not already present
+        special_token = "<encoder-only>"
+        if special_token not in self.tokenizer.get_vocab():
+            self.tokenizer.add_tokens([special_token], special_tokens=True)
+            # Resize model embeddings to accommodate new token
+            self.model.resize_token_embeddings(len(self.tokenizer))
 
     def _resolve_config(
         self,

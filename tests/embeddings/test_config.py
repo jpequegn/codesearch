@@ -1,7 +1,7 @@
 """Tests for embedding configuration system."""
 
 import os
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -215,3 +215,38 @@ class TestPoolingStrategy:
         """Test creating from string."""
         assert PoolingStrategy("mean") == PoolingStrategy.MEAN
         assert PoolingStrategy("cls") == PoolingStrategy.CLS
+
+
+class TestUniXcoderDefault:
+    """Tests for UniXcoder as default model."""
+
+    def test_default_is_unixcoder(self):
+        """Test that UniXcoder is the default model."""
+        assert DEFAULT_MODEL_NAME == "unixcoder"
+
+    def test_unixcoder_config_correct(self):
+        """Test that UniXcoder config has correct settings."""
+        config = MODEL_REGISTRY["unixcoder"]
+        assert config.model_name == "unixcoder"
+        assert config.model_path == "microsoft/unixcoder-base"
+        assert config.dimensions == 768
+        assert config.max_length == 512
+        assert config.pooling == PoolingStrategy.MEAN
+
+    def test_default_config_returns_unixcoder(self):
+        """Test that get_embedding_config returns UniXcoder by default."""
+        with patch.dict(os.environ, {}, clear=True):
+            with patch(
+                "codesearch.embeddings.config.get_config_file",
+                return_value=None
+            ):
+                config = get_embedding_config()
+                assert config.model_name == "unixcoder"
+                assert config.model_path == "microsoft/unixcoder-base"
+
+    def test_unixcoder_same_dimensions_as_codebert(self):
+        """Test UniXcoder is a drop-in replacement for CodeBERT."""
+        unixcoder = MODEL_REGISTRY["unixcoder"]
+        codebert = MODEL_REGISTRY["codebert"]
+        assert unixcoder.dimensions == codebert.dimensions
+        assert unixcoder.max_length == codebert.max_length

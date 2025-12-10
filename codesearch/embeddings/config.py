@@ -126,8 +126,9 @@ MODEL_REGISTRY: Dict[str, EmbeddingConfig] = {
     ),
 }
 
-# Default model name
-DEFAULT_MODEL_NAME = "codebert"
+# Default model name - UniXcoder provides better embeddings than CodeBERT
+# while maintaining the same size (125M params) and CPU-friendliness
+DEFAULT_MODEL_NAME = "unixcoder"
 
 
 def get_available_models() -> list[str]:
