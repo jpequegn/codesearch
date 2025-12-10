@@ -1,20 +1,18 @@
 """Database initialization and setup utilities for LanceDB."""
 
-import lancedb
-from pathlib import Path
-from typing import Optional, List, Dict
+import json
 import logging
 from datetime import datetime, timezone
-import json
+from pathlib import Path
+from typing import Dict, Optional
 
-import pyarrow as pa
+import lancedb
 
 from codesearch.lancedb.models import (
     get_code_entities_schema,
     get_code_relationships_schema,
     get_search_metadata_schema,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +57,7 @@ class DatabaseInitializer:
         },
     }
 
-    def __init__(self, db_path: Optional[Path] = None):
+    def __init__(self, db_path: Optional[Path] = None) -> None:
         """Initialize database initializer.
 
         Args:
@@ -273,7 +271,7 @@ class DatabaseInitializer:
             logger.error(f"Failed to reset database: {e}")
             return False
 
-    def _write_config(self):
+    def _write_config(self) -> None:
         """Write database configuration to file."""
         config = self.DEFAULT_CONFIG.copy()
         config["created_at"] = datetime.now(timezone.utc).isoformat()

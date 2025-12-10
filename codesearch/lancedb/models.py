@@ -1,12 +1,11 @@
 """LanceDB schema data models and PyArrow schemas for table creation."""
 
 from dataclasses import dataclass, field
-from typing import List, Optional
-from enum import Enum
 from datetime import datetime, timezone
+from enum import Enum
+from typing import List, Optional
 
 import pyarrow as pa
-
 
 # Vector dimension for CodeBERT embeddings
 EMBEDDING_DIMENSION = 768
