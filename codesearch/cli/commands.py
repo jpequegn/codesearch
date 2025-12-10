@@ -10,12 +10,15 @@ from pathlib import Path
 from typing import Optional, List
 import logging
 
+from rich.console import Console
+
 from codesearch.query import QueryEngine
 from codesearch.lancedb import DatabaseStatistics, DatabaseBackupManager
 from codesearch.cli.config import get_db_path, validate_db_exists, get_config
 from codesearch.cli.formatting import format_results_json, format_results_table
 from codesearch.indexing.incremental import IncrementalIndexer
 from codesearch.indexing.repository import RepositoryRegistry, NamespaceManager
+from codesearch.indexing.scanner import RepositoryScannerImpl
 from codesearch.query.filters import RepositoryFilter
 
 logger = logging.getLogger(__name__)
@@ -262,9 +265,37 @@ def index(
             typer.echo(f"📊 Currently indexed: {indexer.get_indexed_count()} files")
             typer.echo(f"🔄 Incremental update mode enabled")
 
-        typer.echo(f"📁 Scanning {path_obj.name}...")
+        # Scan repository for files
+        console = Console()
+        scanner = RepositoryScannerImpl()
+
+        # Add language filter if specified
+        if language:
+            scanner.config.supported_languages = {language}
+
+        with console.status(f"[bold blue]📁 Scanning {path_obj.name}...", spinner="dots"):
+            files = scanner.scan_repository(str(path_obj))
+            stats = scanner.get_statistics()
+
+        typer.echo(f"📁 Found {len(files)} files to index")
+
+        # Show breakdown by language
+        if stats.get("by_language"):
+            for lang, count in stats["by_language"].items():
+                typer.echo(f"   - {lang}: {count} files")
+
+        if not files:
+            typer.echo("⚠️  No files found to index")
+            typer.echo("   Check that the path contains supported files (.py, .js, .ts, .go)")
+            raise typer.Exit(0)
+
+        # TODO: Issue #51 - Wire up Python parser
         typer.echo(f"🔗 Extracting code entities...")
+
+        # TODO: Issue #52 - Wire up embedding generation
         typer.echo(f"🧮 Generating embeddings...")
+
+        # TODO: Issue #53 - Wire up database storage
         typer.echo(f"💾 Storing in database...")
 
         typer.echo("\n✅ Indexing complete!")
