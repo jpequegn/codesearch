@@ -1,23 +1,35 @@
 from typing import List, Optional
-from codesearch.query.models import SearchResult
-from codesearch.query.filters import MetadataFilter
+
+from codesearch.embeddings.generator import EmbeddingGenerator
 from codesearch.query.exceptions import QueryError
+from codesearch.query.filters import MetadataFilter
+from codesearch.query.models import SearchResult
 
 
 class QueryEngine:
     """Orchestrates vector search with filtering and pagination."""
 
-    def __init__(self, client):
+    def __init__(self, client, embedder: Optional[EmbeddingGenerator] = None):
         """Initialize QueryEngine with LanceDB client.
 
         Args:
             client: LanceDB client instance
+            embedder: Optional EmbeddingGenerator for text search.
+                      If not provided, one will be created on first text search.
         """
         self.client = client
+        self._embedder = embedder
         try:
             self.code_entities_table = client.get_table("code_entities")
         except Exception as e:
             raise QueryError(f"Failed to initialize QueryEngine: {str(e)}", e)
+
+    @property
+    def embedder(self) -> EmbeddingGenerator:
+        """Lazy-load embedding generator on first use."""
+        if self._embedder is None:
+            self._embedder = EmbeddingGenerator()
+        return self._embedder
 
     def search_vector(
         self,
@@ -83,9 +95,21 @@ class QueryEngine:
         Returns:
             List[SearchResult] sorted by similarity
         """
-        # TODO: Embed query_text to vector using EmbeddingGenerator
-        # For now, this is a placeholder
-        raise NotImplementedError("Text search requires EmbeddingGenerator integration")
+        try:
+            # Embed query text to vector
+            query_vector = self.embedder.embed_code(query_text)
+
+            # Delegate to vector search
+            return self.search_vector(
+                query_vector=query_vector,
+                filters=filters,
+                limit=limit,
+                offset=offset
+            )
+        except QueryError:
+            raise
+        except Exception as e:
+            raise QueryError(f"Text search failed: {str(e)}", e) from e
 
     def _apply_filters(
         self,
