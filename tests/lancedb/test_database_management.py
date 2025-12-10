@@ -138,6 +138,78 @@ class TestDatabaseInitializer:
         assert initializer.is_initialized()
         assert initializer.config_file.exists()
 
+    def test_tables_created_on_init(self, temp_db_dir):
+        """Test that all required tables are created during initialization."""
+        import lancedb
+
+        initializer = DatabaseInitializer(temp_db_dir)
+        initializer.initialize()
+
+        # Connect and check tables
+        db = lancedb.connect(str(temp_db_dir))
+        tables = set(db.table_names())
+
+        # All three tables should exist
+        assert "code_entities" in tables
+        assert "code_relationships" in tables
+        assert "search_metadata" in tables
+
+    def test_code_entities_table_schema(self, temp_db_dir):
+        """Test that code_entities table has correct schema with vector column."""
+        import lancedb
+
+        initializer = DatabaseInitializer(temp_db_dir)
+        initializer.initialize()
+
+        db = lancedb.connect(str(temp_db_dir))
+        table = db.open_table("code_entities")
+        schema = table.schema
+
+        # Check key fields exist
+        field_names = [field.name for field in schema]
+        assert "entity_id" in field_names
+        assert "name" in field_names
+        assert "code_text" in field_names
+        assert "code_vector" in field_names
+        assert "language" in field_names
+        assert "entity_type" in field_names
+        assert "repository" in field_names
+        assert "file_path" in field_names
+        assert "source_hash" in field_names
+
+    def test_code_relationships_table_schema(self, temp_db_dir):
+        """Test that code_relationships table has correct schema."""
+        import lancedb
+
+        initializer = DatabaseInitializer(temp_db_dir)
+        initializer.initialize()
+
+        db = lancedb.connect(str(temp_db_dir))
+        table = db.open_table("code_relationships")
+        schema = table.schema
+
+        field_names = [field.name for field in schema]
+        assert "relationship_id" in field_names
+        assert "caller_id" in field_names
+        assert "callee_id" in field_names
+        assert "relationship_type" in field_names
+
+    def test_search_metadata_table_schema(self, temp_db_dir):
+        """Test that search_metadata table has correct schema."""
+        import lancedb
+
+        initializer = DatabaseInitializer(temp_db_dir)
+        initializer.initialize()
+
+        db = lancedb.connect(str(temp_db_dir))
+        table = db.open_table("search_metadata")
+        schema = table.schema
+
+        field_names = [field.name for field in schema]
+        assert "metadata_id" in field_names
+        assert "entity_id" in field_names
+        assert "repository" in field_names
+
     def test_schema_validation(self, initialized_db):
         """Test schema validation checks."""
         initializer = DatabaseInitializer(initialized_db)
@@ -147,6 +219,9 @@ class TestDatabaseInitializer:
         assert checks["config_valid"]
         assert checks["schema_version_match"]
         assert checks["tables_exist"]
+        assert checks["code_entities_exists"]
+        assert checks["code_relationships_exists"]
+        assert checks["search_metadata_exists"]
 
     def test_schema_info(self, initialized_db):
         """Test retrieving schema information."""
@@ -160,7 +235,13 @@ class TestDatabaseInitializer:
 
     def test_idempotent_initialization(self, initialized_db):
         """Test that initialization is idempotent."""
+        import lancedb
+
         initializer = DatabaseInitializer(initialized_db)
+
+        # Get initial table count
+        db = lancedb.connect(str(initialized_db))
+        initial_tables = set(db.table_names())
 
         # Initialize again
         result = initializer.initialize()
@@ -168,6 +249,30 @@ class TestDatabaseInitializer:
 
         # Should still be valid
         assert initializer.is_initialized()
+
+        # Tables should be the same (not duplicated)
+        final_tables = set(db.table_names())
+        assert initial_tables == final_tables
+
+    def test_get_table(self, initialized_db):
+        """Test getting a table by name."""
+        initializer = DatabaseInitializer(initialized_db)
+
+        table = initializer.get_table("code_entities")
+        assert table is not None
+
+        # Non-existent table
+        table = initializer.get_table("nonexistent")
+        assert table is None
+
+    def test_table_exists(self, initialized_db):
+        """Test checking if a table exists."""
+        initializer = DatabaseInitializer(initialized_db)
+
+        assert initializer.table_exists("code_entities")
+        assert initializer.table_exists("code_relationships")
+        assert initializer.table_exists("search_metadata")
+        assert not initializer.table_exists("nonexistent")
 
 
 class TestDatabaseBackupManager:

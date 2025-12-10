@@ -1,9 +1,14 @@
-"""LanceDB schema data models."""
+"""LanceDB schema data models and PyArrow schemas for table creation."""
 
 from dataclasses import dataclass, field
-from typing import List, Optional
-from enum import Enum
 from datetime import datetime, timezone
+from enum import Enum
+from typing import List, Optional
+
+import pyarrow as pa
+
+# Vector dimension for CodeBERT embeddings
+EMBEDDING_DIMENSION = 768
 
 
 # Enums for categorical fields
@@ -197,3 +202,83 @@ class SearchMetadata:
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
         }
+
+
+# PyArrow Schemas for LanceDB table creation
+# These define the exact schema for each table including vector columns
+
+def get_code_entities_schema() -> pa.Schema:
+    """Get PyArrow schema for code_entities table.
+
+    Returns:
+        PyArrow schema with vector column for similarity search.
+    """
+    return pa.schema([
+        pa.field("entity_id", pa.string(), nullable=False),
+        pa.field("repository", pa.string(), nullable=False),
+        pa.field("file_path", pa.string(), nullable=False),
+        pa.field("entity_type", pa.string(), nullable=False),
+        pa.field("language", pa.string(), nullable=False),
+        pa.field("name", pa.string(), nullable=False),
+        pa.field("full_qualified_name", pa.string(), nullable=False),
+        pa.field("code_text", pa.string(), nullable=False),
+        pa.field("docstring", pa.string(), nullable=True),
+        pa.field("code_vector", pa.list_(pa.float32(), EMBEDDING_DIMENSION), nullable=False),
+        pa.field("visibility", pa.string(), nullable=False),
+        pa.field("class_name", pa.string(), nullable=True),
+        pa.field("complexity", pa.int32(), nullable=False),
+        pa.field("line_count", pa.int32(), nullable=False),
+        pa.field("argument_count", pa.int32(), nullable=True),
+        pa.field("return_type", pa.string(), nullable=True),
+        pa.field("keyword_tags", pa.list_(pa.string()), nullable=False),
+        pa.field("user_tags", pa.list_(pa.string()), nullable=False),
+        pa.field("created_at", pa.string(), nullable=False),
+        pa.field("updated_at", pa.string(), nullable=False),
+        pa.field("source_hash", pa.string(), nullable=False),
+    ])
+
+
+def get_code_relationships_schema() -> pa.Schema:
+    """Get PyArrow schema for code_relationships table.
+
+    Returns:
+        PyArrow schema for relationship storage.
+    """
+    return pa.schema([
+        pa.field("relationship_id", pa.string(), nullable=False),
+        pa.field("caller_id", pa.string(), nullable=False),
+        pa.field("callee_id", pa.string(), nullable=False),
+        pa.field("relationship_type", pa.string(), nullable=False),
+        pa.field("call_count", pa.int32(), nullable=False),
+        pa.field("call_context", pa.string(), nullable=True),
+        pa.field("is_indirect", pa.bool_(), nullable=False),
+        pa.field("is_test_only", pa.bool_(), nullable=False),
+        pa.field("created_at", pa.string(), nullable=False),
+        pa.field("updated_at", pa.string(), nullable=False),
+    ])
+
+
+def get_search_metadata_schema() -> pa.Schema:
+    """Get PyArrow schema for search_metadata table.
+
+    Returns:
+        PyArrow schema for search metadata storage.
+    """
+    return pa.schema([
+        pa.field("metadata_id", pa.string(), nullable=False),
+        pa.field("entity_id", pa.string(), nullable=False),
+        pa.field("repository", pa.string(), nullable=False),
+        pa.field("repository_description", pa.string(), nullable=True),
+        pa.field("cyclomatic_complexity", pa.int32(), nullable=False),
+        pa.field("test_coverage_percent", pa.float32(), nullable=True),
+        pa.field("last_modified_days_ago", pa.int32(), nullable=False),
+        pa.field("feature_area", pa.string(), nullable=True),
+        pa.field("implementation_status", pa.string(), nullable=False),
+        pa.field("search_keywords", pa.string(), nullable=False),
+        pa.field("referenced_by_count", pa.int32(), nullable=False),
+        pa.field("reference_count", pa.int32(), nullable=False),
+        pa.field("is_hot_path", pa.bool_(), nullable=False),
+        pa.field("is_public_api", pa.bool_(), nullable=False),
+        pa.field("created_at", pa.string(), nullable=False),
+        pa.field("updated_at", pa.string(), nullable=False),
+    ])
