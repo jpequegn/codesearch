@@ -21,6 +21,7 @@ from codesearch.indexing.incremental import IncrementalIndexer
 from codesearch.indexing.repository import RepositoryRegistry
 from codesearch.indexing.scanner import RepositoryScannerImpl
 from codesearch.lancedb import DatabaseBackupManager, DatabaseStatistics
+from codesearch.lancedb.initialization import DatabaseInitializer
 from codesearch.models import Class, CodeEntity, Function
 from codesearch.parsers.python_parser import PythonParser
 from codesearch.query import QueryEngine
@@ -304,8 +305,9 @@ def index(
         # Create database directory
         db_path_obj.mkdir(parents=True, exist_ok=True)
 
-        # Check if already indexed
-        if db_path_obj.exists() and list(db_path_obj.glob("*")) and not force:
+        # Check if already indexed (before initializing, which creates files)
+        db_initializer = DatabaseInitializer(db_path_obj)
+        if db_initializer.is_initialized() and not force:
             typer.echo(f"⚠️  Database already exists at {db_path}")
             typer.echo("Use --force to re-index")
             raise typer.Exit(1)
@@ -319,6 +321,11 @@ def index(
                 typer.echo("✅ Backup created")
             except Exception as backup_error:
                 typer.echo(f"⚠️  Could not backup database: {backup_error}")
+
+        # Initialize database schema (idempotent - creates tables if needed)
+        if not db_initializer.initialize():
+            typer.echo("❌ Failed to initialize database schema", err=True)
+            raise typer.Exit(2)
 
         typer.echo(f"📇 Indexing {path_obj}...")
 
