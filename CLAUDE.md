@@ -44,7 +44,7 @@ CLI (Typer) → Query Engine → LanceDB (vectors) + Call Graph → Embedding Pi
 | `codesearch/cli/` | Typer-based CLI with Rich formatting. Entry: `main.py`, commands in `commands.py` |
 | `codesearch/query/` | QueryEngine, SearchResult, MetadataFilter for semantic search |
 | `codesearch/lancedb/` | Vector DB layer. Schema: `code_entities`, `code_relationships`, `search_metadata` |
-| `codesearch/embeddings/` | Transformer models (MiniLM 384-dim default, MPNet 768-dim) |
+| `codesearch/embeddings/` | Transformer models (CodeBERT 768-dim default) |
 | `codesearch/indexing/` | Incremental indexing with hash-based deduplication |
 | `codesearch/parsers/` | tree-sitter based parsing. Python fully implemented, TS/Go extensible |
 | `codesearch/caching/` | AST and embedding caches with TTL |
