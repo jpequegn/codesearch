@@ -5,7 +5,7 @@ Supports semantic code search, analysis, and indexing operations.
 """
 
 import typer
-from typing import Optional
+from typing import Annotated, Optional
 from codesearch import __version__
 from codesearch.cli.commands import (
     pattern, find_similar, dependencies, index, refactor_dupes, list_functions,
@@ -30,35 +30,23 @@ def version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
-def main(
-    version: Optional[bool] = typer.Option(
-        None,
-        "--version",
-        "-v",
-        callback=version_callback,
-        is_eager=True,
-        help="Show version and exit",
-    ),
-) -> None:
-    """Codesearch - Semantic code search using vector embeddings.
-
-    A powerful CLI tool for semantic code search using vector embeddings
-    and LanceDB. Search for similar code, analyze dependencies, and
-    optimize duplicate code patterns.
-    """
-    # This function serves as the main entry point for the CLI app
-    pass
-
-
 # Create Typer application with enhanced configuration
 app = typer.Typer(
     help="Semantic code search tool using vector embeddings and LanceDB",
-    invoke_without_command=True,
     no_args_is_help=True,
 )
 
-# Add version callback to main app
-app.command()(main)
+
+@app.callback()
+def main(
+    version: Annotated[
+        Optional[bool],
+        typer.Option("--version", "-v", callback=version_callback, is_eager=True,
+                     help="Show version and exit")
+    ] = None,
+) -> None:
+    """Semantic code search using vector embeddings and LanceDB."""
+    pass
 
 # Register all commands as subcommands
 app.command(name="search")(pattern)
