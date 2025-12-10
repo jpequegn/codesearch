@@ -51,6 +51,18 @@ class EmbeddingGenerator:
             "device": self.device,
         }
 
+    def _mean_pooling(self, model_output, attention_mask):
+        """Apply mean pooling to token embeddings.
+
+        Mean pooling produces more discriminative embeddings than [CLS] token
+        for code similarity tasks, as it captures information from all tokens.
+        """
+        token_embeddings = model_output.last_hidden_state
+        input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+        sum_embeddings = torch.sum(token_embeddings * input_mask_expanded, 1)
+        sum_mask = torch.clamp(input_mask_expanded.sum(1), min=1e-9)
+        return sum_embeddings / sum_mask
+
     def embed_code(self, code_text: str) -> List[float]:
         """
         Generate embedding for a single code snippet.
@@ -70,11 +82,10 @@ class EmbeddingGenerator:
             padding=True,
         ).to(self.device)
 
-        # Generate embedding
+        # Generate embedding using mean pooling (better than [CLS] for code)
         with torch.no_grad():
             outputs = self.model(**inputs)
-            # Use [CLS] token embedding (first token)
-            embedding = outputs.last_hidden_state[:, 0, :].cpu()
+            embedding = self._mean_pooling(outputs, inputs["attention_mask"]).cpu()
 
         # L2 normalize
         embedding = torch.nn.functional.normalize(embedding, p=2, dim=1)
@@ -103,11 +114,10 @@ class EmbeddingGenerator:
             padding=True,
         ).to(self.device)
 
-        # Generate embeddings for all at once
+        # Generate embeddings using mean pooling (better than [CLS] for code)
         with torch.no_grad():
             outputs = self.model(**inputs)
-            # Use [CLS] token embedding (first token)
-            embeddings = outputs.last_hidden_state[:, 0, :]  # (batch_size, 768)
+            embeddings = self._mean_pooling(outputs, inputs["attention_mask"])
 
         # L2 normalize
         embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
