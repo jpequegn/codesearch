@@ -80,7 +80,7 @@ class DataIngestionPipeline:
         if valid_entities:
             try:
                 # Get code_entities table
-                code_entities_table = self.client.get_table("code_entities")
+                code_entities_table = self.client.open_table("code_entities")
 
                 # Convert entities to dict format for insertion
                 entity_dicts = [self._entity_to_dict(e) for e in valid_entities]
@@ -119,24 +119,40 @@ class DataIngestionPipeline:
     def _entity_to_dict(self, entity: CodeEntity) -> dict:
         """Convert CodeEntity to dictionary for database insertion.
 
+        Converts the simpler CodeEntity from codesearch.models to the full
+        LanceDB schema format expected by the code_entities table.
+
         Args:
             entity: CodeEntity to convert
 
         Returns:
-            Dictionary representation of entity
+            Dictionary representation of entity matching LanceDB schema
         """
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc).isoformat()
+
         return {
             "entity_id": entity.entity_id,
-            "name": entity.name,
-            "code_text": entity.code_text,
-            "code_vector": entity.code_vector,
-            "language": entity.language,
-            "entity_type": entity.entity_type,
             "repository": entity.repository,
             "file_path": entity.file_path,
-            "start_line": entity.start_line,
-            "end_line": entity.end_line,
+            "entity_type": entity.entity_type,
+            "language": entity.language,
+            "name": entity.name,
+            "full_qualified_name": f"{entity.file_path}:{entity.name}",
+            "code_text": entity.code_text,
+            "docstring": None,  # Not available in simple CodeEntity
+            "code_vector": entity.code_vector,
             "visibility": entity.visibility,
+            "class_name": None,  # Not available in simple CodeEntity
+            "complexity": 0,
+            "line_count": entity.end_line - entity.start_line + 1 if entity.end_line >= entity.start_line else 0,
+            "argument_count": None,
+            "return_type": None,
+            "keyword_tags": [],
+            "user_tags": [],
+            "created_at": now,
+            "updated_at": now,
             "source_hash": entity.source_hash,
         }
 
@@ -173,7 +189,7 @@ class DataIngestionPipeline:
         # Insert valid relationships
         if valid_relationships:
             try:
-                code_relationships_table = self.client.get_table("code_relationships")
+                code_relationships_table = self.client.open_table("code_relationships")
 
                 rel_dicts = [self._relationship_to_dict(r) for r in valid_relationships]
                 code_relationships_table.add(rel_dicts)
@@ -243,7 +259,7 @@ class DataIngestionPipeline:
         # Insert valid metadata
         if valid_metadata:
             try:
-                search_metadata_table = self.client.get_table("search_metadata")
+                search_metadata_table = self.client.open_table("search_metadata")
 
                 metadata_dicts = [self._metadata_to_dict(m) for m in valid_metadata]
                 search_metadata_table.add(metadata_dicts)
@@ -315,15 +331,15 @@ class DataIngestionPipeline:
 
             # Remove in reverse order (metadata → relationships → entities)
             if metadata_to_remove:
-                metadata_table = self.client.get_table("search_metadata")
+                metadata_table = self.client.open_table("search_metadata")
                 metadata_table.delete(f"metadata_id IN {metadata_to_remove}")
 
             if relationships_to_remove:
-                relationships_table = self.client.get_table("code_relationships")
+                relationships_table = self.client.open_table("code_relationships")
                 relationships_table.delete(f"caller_id IN {relationships_to_remove} OR callee_id IN {relationships_to_remove}")
 
             if entities_to_remove:
-                entities_table = self.client.get_table("code_entities")
+                entities_table = self.client.open_table("code_entities")
                 entities_table.delete(f"entity_id IN {entities_to_remove}")
 
             # Record rollback in audit trail
