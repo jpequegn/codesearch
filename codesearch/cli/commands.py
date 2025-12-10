@@ -999,3 +999,135 @@ def search_multi(
     except Exception as e:
         typer.echo(f"❌ Error: {str(e)}", err=True)
         raise typer.Exit(1)
+
+
+def benchmark_models(
+    models: Optional[str] = typer.Option(
+        None,
+        "--models",
+        "-m",
+        help="Comma-separated list of models to benchmark (default: all local models)",
+    ),
+    samples_path: Optional[Path] = typer.Option(
+        None,
+        "--samples",
+        "-s",
+        help="Path to directory with code sample files",
+    ),
+    output: str = typer.Option(
+        "table",
+        "--format",
+        "-f",
+        help="Output format: table or json",
+    ),
+    skip_quality: bool = typer.Option(
+        False,
+        "--skip-quality",
+        help="Skip quality benchmarks (faster)",
+    ),
+    skip_performance: bool = typer.Option(
+        False,
+        "--skip-performance",
+        help="Skip performance benchmarks",
+    ),
+    include_api: bool = typer.Option(
+        False,
+        "--include-api",
+        help="Include API-based models (requires API keys)",
+    ),
+    save_path: Optional[Path] = typer.Option(
+        None,
+        "--save",
+        help="Save results to JSON file",
+    ),
+) -> None:
+    """Benchmark embedding models for quality and performance.
+
+    Compares different embedding models to help choose the best one
+    for your use case.
+
+    Quality metrics:
+    - Same-function similarity (variable renaming should maintain similarity)
+    - Different-function distinction (unrelated functions should differ)
+    - Cross-language similarity (equivalent code across languages)
+
+    Performance metrics:
+    - Embedding speed (samples/second)
+    - Memory usage (peak RAM)
+    - Storage requirements (bytes per embedding)
+
+    Example:
+        $ codesearch benchmark-models
+        $ codesearch benchmark-models --models codebert,unixcoder
+        $ codesearch benchmark-models --format json --save results.json
+    """
+    console = Console()
+
+    try:
+        from codesearch.benchmarks.runner import BenchmarkRunner
+
+        # Parse model list
+        model_list = None
+        if models:
+            model_list = [m.strip() for m in models.split(",")]
+
+        # Load custom samples if provided
+        custom_samples = None
+        if samples_path:
+            if not samples_path.exists():
+                console.print(f"[red]❌ Samples path not found: {samples_path}[/red]")
+                raise typer.Exit(1)
+
+            custom_samples = []
+            for file in samples_path.iterdir():
+                if file.is_file() and file.suffix in {".py", ".js", ".ts", ".go", ".rs"}:
+                    content = file.read_text()
+                    if content.strip():
+                        custom_samples.append(content)
+
+            if not custom_samples:
+                console.print(f"[red]❌ No code files found in: {samples_path}[/red]")
+                raise typer.Exit(1)
+
+            console.print(f"[blue]Loaded {len(custom_samples)} custom samples[/blue]")
+
+        # Create runner
+        runner = BenchmarkRunner(
+            models=model_list,
+            samples=custom_samples,
+            skip_api_models=not include_api,
+        )
+
+        # Show models being benchmarked
+        console.print(f"\n[bold]Benchmarking {len(runner.models)} models:[/bold]")
+        for m in runner.models:
+            console.print(f"  • {m}")
+
+        # Run benchmarks
+        runner.run(
+            run_quality=not skip_quality,
+            run_performance=not skip_performance,
+            console=console,
+        )
+
+        # Output results
+        console.print("\n")
+        if output == "json":
+            console.print(runner.format_json())
+        else:
+            console.print(runner.format_table())
+
+        # Save if requested
+        if save_path:
+            runner.save_results(save_path)
+            console.print(f"\n[green]✅ Results saved to {save_path}[/green]")
+
+    except typer.Exit:
+        raise
+    except ImportError as e:
+        console.print(f"[red]❌ Missing dependency: {e}[/red]")
+        console.print("[yellow]Install numpy: pip install numpy[/yellow]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]❌ Error: {str(e)}[/red]")
+        raise typer.Exit(1)
