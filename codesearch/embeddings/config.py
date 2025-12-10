@@ -134,6 +134,18 @@ MODEL_REGISTRY: Dict[str, EmbeddingConfig] = {
         max_length=512,
         pooling=PoolingStrategy.MEAN,
     ),
+
+    # Voyage Code 3 - API-based, state-of-the-art code embeddings
+    # Requires VOYAGE_API_KEY environment variable
+    "voyage-code-3": EmbeddingConfig(
+        model_name="voyage-code-3",
+        model_path="voyage-code-3",  # API model ID
+        dimensions=1024,
+        max_length=16000,  # 16K token context
+        device="api",
+        pooling=PoolingStrategy.MEAN,  # API handles pooling
+        api_endpoint="https://api.voyageai.com/v1/embeddings",
+    ),
 }
 
 # Default model name - UniXcoder provides better embeddings than CodeBERT
@@ -234,7 +246,13 @@ def get_embedding_config(
         )
 
     # Check for API key from environment for API-based models
-    api_key = os.environ.get("CODESEARCH_EMBEDDING_API_KEY")
+    # Try model-specific key first, then generic key
+    api_key = None
+    if config.model_name == "voyage-code-3":
+        api_key = os.environ.get("VOYAGE_API_KEY")
+    if not api_key:
+        api_key = os.environ.get("CODESEARCH_EMBEDDING_API_KEY")
+
     if api_key and config.api_key is None:
         config = EmbeddingConfig(
             model_name=config.model_name,

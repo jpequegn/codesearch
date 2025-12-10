@@ -57,6 +57,9 @@ dev = [
     "mypy>=1.0.0",
     "ruff>=0.1.0",
 ]
+voyage = [
+    "voyageai>=0.2.0",
+]
 
 [project.scripts]
 codesearch = "codesearch.cli.main:app"
