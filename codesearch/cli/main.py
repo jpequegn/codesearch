@@ -9,7 +9,7 @@ from typing import Annotated, Optional
 from codesearch import __version__
 from codesearch.cli.commands import (
     pattern, find_similar, dependencies, index, refactor_dupes, list_functions,
-    repo_list, repo_add, repo_remove, search_multi, benchmark_models
+    repo_list, repo_add, repo_remove, search_multi, benchmark_models, reindex, model_info
 )
 from codesearch.cli.interactive import (
     detail, context, compare, config_show, config_init
@@ -71,6 +71,10 @@ app.command(name="search-multi")(search_multi)
 
 # Register benchmark commands
 app.command(name="benchmark-models")(benchmark_models)
+
+# Register model migration commands
+app.command(name="reindex")(reindex)
+app.command(name="model-info")(model_info)
 
 
 def run() -> None:

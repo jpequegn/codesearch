@@ -1,6 +1,8 @@
+from pathlib import Path
 from typing import List, Optional
 
 from codesearch.embeddings.generator import EmbeddingGenerator
+from codesearch.lancedb.initialization import DatabaseInitializer, DimensionMismatchError
 from codesearch.query.exceptions import QueryError
 from codesearch.query.filters import MetadataFilter
 from codesearch.query.models import SearchResult
@@ -9,20 +11,41 @@ from codesearch.query.models import SearchResult
 class QueryEngine:
     """Orchestrates vector search with filtering and pagination."""
 
-    def __init__(self, client, embedder: Optional[EmbeddingGenerator] = None):
+    def __init__(
+        self,
+        client,
+        embedder: Optional[EmbeddingGenerator] = None,
+        db_path: Optional[Path] = None,
+    ):
         """Initialize QueryEngine with LanceDB client.
 
         Args:
             client: LanceDB client instance
             embedder: Optional EmbeddingGenerator for text search.
                       If not provided, one will be created on first text search.
+            db_path: Optional path to database directory for dimension checking.
         """
         self.client = client
         self._embedder = embedder
+        self._db_path = db_path
+        self._expected_dims: Optional[int] = None
         try:
             self.code_entities_table = client.open_table("code_entities")
+            # Try to get expected dimensions from database config
+            if db_path:
+                self._load_expected_dimensions(db_path)
         except Exception as e:
             raise QueryError(f"Failed to initialize QueryEngine: {str(e)}", e)
+
+    def _load_expected_dimensions(self, db_path: Path) -> None:
+        """Load expected embedding dimensions from database config."""
+        try:
+            initializer = DatabaseInitializer(db_path)
+            model_info = initializer.get_embedding_model()
+            if model_info:
+                self._expected_dims = model_info.dimensions
+        except Exception:
+            pass  # Dimension checking is optional
 
     @property
     def embedder(self) -> EmbeddingGenerator:
@@ -41,15 +64,25 @@ class QueryEngine:
         """Search by pre-computed vector with optional filtering.
 
         Args:
-            query_vector: 768-dimensional query embedding
+            query_vector: Query embedding vector (dimensions must match indexed data)
             filters: List of MetadataFilter objects (optional)
             limit: Number of results to return (default 10)
             offset: Number of results to skip (default 0)
 
         Returns:
             List[SearchResult] sorted by similarity (best first)
+
+        Raises:
+            DimensionMismatchError: If query vector dimensions don't match database.
         """
         try:
+            # Validate dimensions if we know what to expect
+            if self._expected_dims and len(query_vector) != self._expected_dims:
+                raise DimensionMismatchError(
+                    query_dims=len(query_vector),
+                    expected_dims=self._expected_dims,
+                )
+
             # Fetch more results to account for filtering dropout
             fetch_limit = limit * 2 if filters else limit
 

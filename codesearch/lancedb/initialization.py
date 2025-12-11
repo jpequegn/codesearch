@@ -2,6 +2,7 @@
 
 import json
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
@@ -16,6 +17,70 @@ from codesearch.lancedb.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class EmbeddingModelInfo:
+    """Information about the embedding model used for indexing."""
+
+    name: str
+    model_path: str
+    dimensions: int
+    indexed_at: str
+    entity_count: int = 0
+
+    def to_dict(self) -> Dict:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "name": self.name,
+            "model_path": self.model_path,
+            "dimensions": self.dimensions,
+            "indexed_at": self.indexed_at,
+            "entity_count": self.entity_count,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "EmbeddingModelInfo":
+        """Create from dictionary."""
+        return cls(
+            name=data.get("name", "unknown"),
+            model_path=data.get("model_path", "unknown"),
+            dimensions=data.get("dimensions", DEFAULT_EMBEDDING_DIMENSION),
+            indexed_at=data.get("indexed_at", ""),
+            entity_count=data.get("entity_count", 0),
+        )
+
+
+class ModelMismatchError(Exception):
+    """Raised when embedding model doesn't match indexed model."""
+
+    def __init__(
+        self,
+        indexed_model: str,
+        indexed_dims: int,
+        requested_model: str,
+        requested_dims: int,
+    ):
+        self.indexed_model = indexed_model
+        self.indexed_dims = indexed_dims
+        self.requested_model = requested_model
+        self.requested_dims = requested_dims
+        super().__init__(
+            f"Model mismatch: database indexed with '{indexed_model}' ({indexed_dims}d), "
+            f"but requested '{requested_model}' ({requested_dims}d)"
+        )
+
+
+class DimensionMismatchError(Exception):
+    """Raised when query vector dimensions don't match indexed dimensions."""
+
+    def __init__(self, query_dims: int, expected_dims: int):
+        self.query_dims = query_dims
+        self.expected_dims = expected_dims
+        super().__init__(
+            f"Dimension mismatch: query vector has {query_dims} dimensions, "
+            f"but database expects {expected_dims}. Re-index with matching model."
+        )
 
 
 # Table names as constants
@@ -324,3 +389,150 @@ class DatabaseInitializer:
             return config.get("embedding_dimensions", DEFAULT_EMBEDDING_DIMENSION)
         except Exception:
             return DEFAULT_EMBEDDING_DIMENSION
+
+    def set_embedding_model(
+        self,
+        model_name: str,
+        model_path: str,
+        dimensions: int,
+        entity_count: int = 0,
+    ) -> None:
+        """Store embedding model metadata in database config.
+
+        Args:
+            model_name: Short name of the model (e.g., "unixcoder")
+            model_path: HuggingFace model path
+            dimensions: Vector dimensions
+            entity_count: Number of entities indexed
+        """
+        try:
+            config = self._read_config() if self.config_file.exists() else {}
+        except Exception:
+            config = {}
+
+        config["embedding_model"] = {
+            "name": model_name,
+            "model_path": model_path,
+            "dimensions": dimensions,
+            "indexed_at": datetime.now(timezone.utc).isoformat(),
+            "entity_count": entity_count,
+        }
+
+        # Also update top-level embedding_dimensions for compatibility
+        config["embedding_dimensions"] = dimensions
+
+        with open(self.config_file, "w") as f:
+            json.dump(config, f, indent=2)
+
+        logger.info(
+            f"Stored embedding model metadata: {model_name} ({dimensions}d, {entity_count} entities)"
+        )
+
+    def get_embedding_model(self) -> Optional[EmbeddingModelInfo]:
+        """Get embedding model metadata from database config.
+
+        Returns:
+            EmbeddingModelInfo if available, None otherwise.
+        """
+        if not self.config_file.exists():
+            return None
+
+        try:
+            config = self._read_config()
+            model_data = config.get("embedding_model")
+            if model_data:
+                return EmbeddingModelInfo.from_dict(model_data)
+            return None
+        except Exception as e:
+            logger.warning(f"Failed to read embedding model metadata: {e}")
+            return None
+
+    def check_model_compatibility(
+        self,
+        requested_model: str,
+        requested_dims: int,
+    ) -> tuple[bool, Optional[str]]:
+        """Check if requested model is compatible with indexed model.
+
+        Args:
+            requested_model: Model name being requested
+            requested_dims: Dimensions of requested model
+
+        Returns:
+            Tuple of (is_compatible, warning_message).
+            - (True, None) if compatible or no indexed model
+            - (False, message) if incompatible
+        """
+        indexed_model = self.get_embedding_model()
+
+        # No indexed model yet - any model is compatible
+        if indexed_model is None:
+            return True, None
+
+        # Same model - compatible
+        if indexed_model.name == requested_model:
+            return True, None
+
+        # Different model - dimension mismatch is critical
+        if indexed_model.dimensions != requested_dims:
+            msg = (
+                f"⚠️  Model mismatch detected!\n\n"
+                f"   Database indexed with: {indexed_model.name} ({indexed_model.dimensions} dims)\n"
+                f"   Requested model:       {requested_model} ({requested_dims} dims)\n\n"
+                f"   Options:\n"
+                f"   1. Re-index with new model: codesearch index . --force --model {requested_model}\n"
+                f"   2. Search with original model: codesearch search \"query\" --model {indexed_model.name}\n"
+                f"   3. Keep existing index (not recommended for model changes)"
+            )
+            return False, msg
+
+        # Same dimensions but different model - warn but allow
+        msg = (
+            f"⚠️  Model mismatch (same dimensions)!\n\n"
+            f"   Database indexed with: {indexed_model.name} ({indexed_model.dimensions} dims)\n"
+            f"   Requested model:       {requested_model} ({requested_dims} dims)\n\n"
+            f"   Results may be suboptimal. Consider re-indexing for best results."
+        )
+        return True, msg
+
+    def clear_for_reindex(self) -> bool:
+        """Clear database for re-indexing with a new model.
+
+        Drops all tables and resets config. Use with caution.
+
+        Returns:
+            True if successful, False otherwise.
+        """
+        try:
+            db = lancedb.connect(str(self.db_path))
+
+            # Drop existing tables
+            for table_name in db.table_names():
+                db.drop_table(table_name)
+                logger.info(f"Dropped table: {table_name}")
+
+            # Reset config but keep schema version
+            if self.config_file.exists():
+                self.config_file.unlink()
+
+            logger.info("Database cleared for re-indexing")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to clear database: {e}")
+            return False
+
+    def update_entity_count(self, count: int) -> None:
+        """Update the entity count in embedding model metadata.
+
+        Args:
+            count: New entity count
+        """
+        model_info = self.get_embedding_model()
+        if model_info:
+            self.set_embedding_model(
+                model_name=model_info.name,
+                model_path=model_info.model_path,
+                dimensions=model_info.dimensions,
+                entity_count=count,
+            )
