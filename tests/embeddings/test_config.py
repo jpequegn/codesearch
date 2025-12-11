@@ -298,3 +298,115 @@ class TestCodeT5PlusModels:
         assert config_110m.dimensions == 256
         assert config_220m.dimensions == 768
         assert config_770m.dimensions == 1024
+
+
+class TestMLXModels:
+    """Tests for MLX model configurations."""
+
+    def test_mlx_models_in_registry(self):
+        """Test that all MLX models are in the registry."""
+        from codesearch.embeddings.config import MLX_MODELS
+        models = get_available_models()
+        for mlx_model in MLX_MODELS:
+            assert mlx_model in models, f"MLX model {mlx_model} not in registry"
+
+    def test_is_mlx_model_returns_true_for_mlx_models(self):
+        """Test is_mlx_model returns True for MLX models."""
+        from codesearch.embeddings.config import is_mlx_model, MLX_MODELS
+        for model in MLX_MODELS:
+            assert is_mlx_model(model), f"is_mlx_model({model}) should be True"
+
+    def test_is_mlx_model_returns_false_for_non_mlx_models(self):
+        """Test is_mlx_model returns False for non-MLX models."""
+        from codesearch.embeddings.config import is_mlx_model
+        assert not is_mlx_model("codebert")
+        assert not is_mlx_model("unixcoder")
+        assert not is_mlx_model("voyage-code-3")
+        assert not is_mlx_model("codet5p-110m")
+
+    def test_is_mlx_model_detects_mlx_suffix(self):
+        """Test is_mlx_model detects models with -mlx suffix."""
+        from codesearch.embeddings.config import is_mlx_model
+        assert is_mlx_model("some-custom-mlx")
+        assert not is_mlx_model("mlx-something")  # prefix not suffix
+
+    def test_nomic_mlx_config(self):
+        """Test nomic-mlx configuration."""
+        config = get_model_config("nomic-mlx")
+        assert config.model_name == "nomic-mlx"
+        assert config.model_path == "nomic-text-v1.5"
+        assert config.dimensions == 768
+        assert config.max_length == 8192
+        assert config.device == "mlx"
+        assert config.pooling == PoolingStrategy.MEAN
+
+    def test_bge_m3_mlx_config(self):
+        """Test bge-m3-mlx configuration."""
+        config = get_model_config("bge-m3-mlx")
+        assert config.model_name == "bge-m3-mlx"
+        assert config.model_path == "bge-m3"
+        assert config.dimensions == 1024
+        assert config.max_length == 8192
+        assert config.device == "mlx"
+
+    def test_bge_large_mlx_config(self):
+        """Test bge-large-mlx configuration."""
+        config = get_model_config("bge-large-mlx")
+        assert config.model_name == "bge-large-mlx"
+        assert config.model_path == "bge-large"
+        assert config.dimensions == 1024
+        assert config.max_length == 512
+        assert config.device == "mlx"
+
+    def test_bge_small_mlx_config(self):
+        """Test bge-small-mlx configuration."""
+        config = get_model_config("bge-small-mlx")
+        assert config.model_name == "bge-small-mlx"
+        assert config.model_path == "bge-small"
+        assert config.dimensions == 384
+        assert config.max_length == 512
+        assert config.device == "mlx"
+
+    def test_mlx_device_without_model_uses_default_mlx_model(self):
+        """Test that device=mlx without model uses default MLX model."""
+        from codesearch.embeddings.config import DEFAULT_MLX_MODEL
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("codesearch.embeddings.config.get_config_file", return_value=None):
+                config = get_embedding_config(device="mlx")
+                assert config.model_name == DEFAULT_MLX_MODEL
+                assert config.device == "mlx"
+
+    def test_mlx_device_with_non_mlx_model_uses_default_mlx_model(self):
+        """Test that device=mlx with non-MLX model switches to default MLX model."""
+        from codesearch.embeddings.config import DEFAULT_MLX_MODEL
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("codesearch.embeddings.config.get_config_file", return_value=None):
+                # Request codebert with mlx device - should switch to default MLX model
+                config = get_embedding_config(model="codebert", device="mlx")
+                assert config.model_name == DEFAULT_MLX_MODEL
+
+    def test_explicit_mlx_model_preserves_model(self):
+        """Test that explicitly specifying an MLX model is preserved."""
+        config = get_embedding_config(model="bge-m3-mlx")
+        assert config.model_name == "bge-m3-mlx"
+        assert config.device == "mlx"
+
+    def test_env_var_mlx_device(self):
+        """Test that CODESEARCH_EMBEDDING_DEVICE=mlx works."""
+        from codesearch.embeddings.config import DEFAULT_MLX_MODEL
+        with patch.dict(os.environ, {"CODESEARCH_EMBEDDING_DEVICE": "mlx"}, clear=True):
+            with patch("codesearch.embeddings.config.get_config_file", return_value=None):
+                config = get_embedding_config()
+                assert config.model_name == DEFAULT_MLX_MODEL
+                assert config.device == "mlx"
+
+    def test_default_mlx_model_is_nomic(self):
+        """Test that nomic-mlx is the default MLX model."""
+        from codesearch.embeddings.config import DEFAULT_MLX_MODEL
+        assert DEFAULT_MLX_MODEL == "nomic-mlx"
+
+    def test_mlx_models_constant_has_all_models(self):
+        """Test that MLX_MODELS constant contains all MLX models."""
+        from codesearch.embeddings.config import MLX_MODELS
+        expected = {"nomic-mlx", "bge-m3-mlx", "bge-large-mlx", "bge-small-mlx"}
+        assert MLX_MODELS == expected

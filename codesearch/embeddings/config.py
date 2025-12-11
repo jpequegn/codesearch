@@ -146,11 +146,73 @@ MODEL_REGISTRY: Dict[str, EmbeddingConfig] = {
         pooling=PoolingStrategy.MEAN,  # API handles pooling
         api_endpoint="https://api.voyageai.com/v1/embeddings",
     ),
+
+    # =========================================================================
+    # MLX Models - Apple Silicon optimized (requires mlx-embedding-models)
+    # =========================================================================
+
+    # Nomic Text v1.5 - Best general-purpose MLX model
+    "nomic-mlx": EmbeddingConfig(
+        model_name="nomic-mlx",
+        model_path="nomic-text-v1.5",  # mlx-embedding-models registry name
+        dimensions=768,
+        max_length=8192,
+        device="mlx",
+        pooling=PoolingStrategy.MEAN,
+    ),
+
+    # BGE-M3 - Highest quality, multi-lingual
+    "bge-m3-mlx": EmbeddingConfig(
+        model_name="bge-m3-mlx",
+        model_path="bge-m3",
+        dimensions=1024,
+        max_length=8192,
+        device="mlx",
+        pooling=PoolingStrategy.MEAN,
+    ),
+
+    # BGE Large - Strong baseline
+    "bge-large-mlx": EmbeddingConfig(
+        model_name="bge-large-mlx",
+        model_path="bge-large",
+        dimensions=1024,
+        max_length=512,
+        device="mlx",
+        pooling=PoolingStrategy.MEAN,
+    ),
+
+    # BGE Small - Fastest, smaller dimensions
+    "bge-small-mlx": EmbeddingConfig(
+        model_name="bge-small-mlx",
+        model_path="bge-small",
+        dimensions=384,
+        max_length=512,
+        device="mlx",
+        pooling=PoolingStrategy.MEAN,
+    ),
 }
 
 # Default model name - UniXcoder provides better embeddings than CodeBERT
 # while maintaining the same size (125M params) and CPU-friendliness
 DEFAULT_MODEL_NAME = "unixcoder"
+
+# MLX models set for easy checking
+MLX_MODELS = {"nomic-mlx", "bge-m3-mlx", "bge-large-mlx", "bge-small-mlx"}
+
+# Default MLX model for Apple Silicon users
+DEFAULT_MLX_MODEL = "nomic-mlx"
+
+
+def is_mlx_model(model_name: str) -> bool:
+    """Check if a model requires the MLX backend.
+
+    Args:
+        model_name: Name of the model to check
+
+    Returns:
+        True if the model uses MLX backend
+    """
+    return model_name in MLX_MODELS or model_name.endswith("-mlx")
 
 
 def get_available_models() -> list[str]:
@@ -190,6 +252,10 @@ def get_embedding_config(
     3. Configuration file embedding section
     4. Default values
 
+    Special handling for MLX:
+    - If device="mlx" and model is not an MLX model, use DEFAULT_MLX_MODEL
+    - MLX models automatically use device="mlx"
+
     Args:
         model: Model name override
         device: Device override
@@ -222,17 +288,25 @@ def get_embedding_config(
     if resolved_device is None:
         resolved_device = file_config.get("device")
 
+    # Handle MLX device: if user requests mlx device but doesn't specify
+    # an MLX model, use the default MLX model
+    if resolved_device == "mlx" and (resolved_model is None or not is_mlx_model(resolved_model)):
+        resolved_model = DEFAULT_MLX_MODEL
+
     # Use defaults if still not set
     if resolved_model is None:
         resolved_model = DEFAULT_MODEL_NAME
-    if resolved_device is None:
-        resolved_device = "auto"
 
     # Get the model config from registry
     config = get_model_config(resolved_model)
 
-    # Override device if specified
-    if resolved_device and resolved_device != config.device:
+    # Determine final device:
+    # - If user explicitly specified device, use it
+    # - If device is not specified (None) or "auto", use model's defined device
+    if resolved_device is None or resolved_device == "auto":
+        # Use model's defined device (respects MLX, API, etc.)
+        pass
+    elif resolved_device != config.device:
         # Create a new config with the overridden device
         config = EmbeddingConfig(
             model_name=config.model_name,
