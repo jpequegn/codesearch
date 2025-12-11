@@ -16,7 +16,12 @@ from datetime import datetime, timezone
 import json
 
 from codesearch.lancedb.pool import DatabaseConnectionPool
-from codesearch.lancedb.initialization import DatabaseInitializer
+from codesearch.lancedb.initialization import (
+    DatabaseInitializer,
+    DimensionMismatchError,
+    EmbeddingModelInfo,
+    ModelMismatchError,
+)
 from codesearch.lancedb.backup import DatabaseBackupManager
 from codesearch.lancedb.statistics import DatabaseStatistics
 from codesearch.lancedb.optimization import DatabaseOptimizer
@@ -598,3 +603,255 @@ class TestConfigurableEmbeddingDimensions:
         list_type = code_vector_field.type
         assert isinstance(list_type, pa.FixedSizeListType)
         assert list_type.list_size == 256
+
+
+class TestEmbeddingModelMigration:
+    """Tests for embedding model migration and re-indexing."""
+
+    def test_embedding_model_info_dataclass(self):
+        """Test EmbeddingModelInfo dataclass."""
+        info = EmbeddingModelInfo(
+            name="unixcoder",
+            model_path="microsoft/unixcoder-base",
+            dimensions=768,
+            indexed_at="2024-01-15T10:30:00Z",
+            entity_count=1000,
+        )
+        assert info.name == "unixcoder"
+        assert info.dimensions == 768
+        assert info.entity_count == 1000
+
+    def test_embedding_model_info_to_dict(self):
+        """Test EmbeddingModelInfo serialization."""
+        info = EmbeddingModelInfo(
+            name="codebert",
+            model_path="microsoft/codebert-base",
+            dimensions=768,
+            indexed_at="2024-01-15T10:30:00Z",
+            entity_count=500,
+        )
+        d = info.to_dict()
+        assert d["name"] == "codebert"
+        assert d["model_path"] == "microsoft/codebert-base"
+        assert d["dimensions"] == 768
+        assert d["entity_count"] == 500
+
+    def test_embedding_model_info_from_dict(self):
+        """Test EmbeddingModelInfo deserialization."""
+        data = {
+            "name": "codet5p-110m",
+            "model_path": "Salesforce/codet5p-110m-embedding",
+            "dimensions": 256,
+            "indexed_at": "2024-01-15T10:30:00Z",
+            "entity_count": 2000,
+        }
+        info = EmbeddingModelInfo.from_dict(data)
+        assert info.name == "codet5p-110m"
+        assert info.dimensions == 256
+        assert info.entity_count == 2000
+
+    def test_set_embedding_model(self, initialized_db):
+        """Test storing embedding model metadata."""
+        initializer = DatabaseInitializer(initialized_db)
+
+        initializer.set_embedding_model(
+            model_name="unixcoder",
+            model_path="microsoft/unixcoder-base",
+            dimensions=768,
+            entity_count=1500,
+        )
+
+        # Retrieve and verify
+        model_info = initializer.get_embedding_model()
+        assert model_info is not None
+        assert model_info.name == "unixcoder"
+        assert model_info.model_path == "microsoft/unixcoder-base"
+        assert model_info.dimensions == 768
+        assert model_info.entity_count == 1500
+        assert model_info.indexed_at != ""  # Should have timestamp
+
+    def test_get_embedding_model_not_set(self, temp_db_dir):
+        """Test getting embedding model when not set."""
+        initializer = DatabaseInitializer(temp_db_dir)
+        initializer.initialize()
+
+        model_info = initializer.get_embedding_model()
+        assert model_info is None
+
+    def test_check_model_compatibility_same_model(self, initialized_db):
+        """Test compatibility check with same model."""
+        initializer = DatabaseInitializer(initialized_db)
+        initializer.set_embedding_model(
+            model_name="unixcoder",
+            model_path="microsoft/unixcoder-base",
+            dimensions=768,
+            entity_count=100,
+        )
+
+        is_compatible, warning = initializer.check_model_compatibility(
+            "unixcoder", 768
+        )
+        assert is_compatible is True
+        assert warning is None
+
+    def test_check_model_compatibility_no_indexed_model(self, initialized_db):
+        """Test compatibility check when no model indexed yet."""
+        initializer = DatabaseInitializer(initialized_db)
+
+        is_compatible, warning = initializer.check_model_compatibility(
+            "codebert", 768
+        )
+        assert is_compatible is True
+        assert warning is None
+
+    def test_check_model_compatibility_different_dims(self, initialized_db):
+        """Test compatibility check with different dimensions (incompatible)."""
+        initializer = DatabaseInitializer(initialized_db)
+        initializer.set_embedding_model(
+            model_name="unixcoder",
+            model_path="microsoft/unixcoder-base",
+            dimensions=768,
+            entity_count=100,
+        )
+
+        # CodeT5+-110M has 256 dimensions
+        is_compatible, warning = initializer.check_model_compatibility(
+            "codet5p-110m", 256
+        )
+        assert is_compatible is False
+        assert warning is not None
+        assert "Model mismatch" in warning
+        assert "768" in warning  # Original dims
+        assert "256" in warning  # Requested dims
+
+    def test_check_model_compatibility_same_dims_different_model(self, initialized_db):
+        """Test compatibility check with same dimensions but different model."""
+        initializer = DatabaseInitializer(initialized_db)
+        initializer.set_embedding_model(
+            model_name="codebert",
+            model_path="microsoft/codebert-base",
+            dimensions=768,
+            entity_count=100,
+        )
+
+        # UniXcoder also has 768 dimensions
+        is_compatible, warning = initializer.check_model_compatibility(
+            "unixcoder", 768
+        )
+        # Same dimensions - compatible but with warning
+        assert is_compatible is True
+        assert warning is not None
+        assert "same dimensions" in warning
+
+    def test_clear_for_reindex(self, initialized_db):
+        """Test clearing database for re-indexing."""
+        import lancedb
+
+        initializer = DatabaseInitializer(initialized_db)
+
+        # Store some model metadata
+        initializer.set_embedding_model(
+            model_name="old_model",
+            model_path="old/path",
+            dimensions=768,
+            entity_count=50,
+        )
+
+        # Clear for reindex
+        result = initializer.clear_for_reindex()
+        assert result is True
+
+        # Config should be removed
+        assert not initializer.config_file.exists()
+
+        # Tables should be dropped
+        db = lancedb.connect(str(initialized_db))
+        assert len(db.table_names()) == 0
+
+    def test_update_entity_count(self, initialized_db):
+        """Test updating entity count in model metadata."""
+        initializer = DatabaseInitializer(initialized_db)
+        initializer.set_embedding_model(
+            model_name="unixcoder",
+            model_path="microsoft/unixcoder-base",
+            dimensions=768,
+            entity_count=100,
+        )
+
+        # Update count
+        initializer.update_entity_count(500)
+
+        # Verify
+        model_info = initializer.get_embedding_model()
+        assert model_info.entity_count == 500
+        # Other fields should be preserved
+        assert model_info.name == "unixcoder"
+        assert model_info.dimensions == 768
+
+    def test_model_mismatch_error(self):
+        """Test ModelMismatchError exception."""
+        error = ModelMismatchError(
+            indexed_model="codebert",
+            indexed_dims=768,
+            requested_model="codet5p-110m",
+            requested_dims=256,
+        )
+        assert error.indexed_model == "codebert"
+        assert error.indexed_dims == 768
+        assert error.requested_model == "codet5p-110m"
+        assert error.requested_dims == 256
+        assert "codebert" in str(error)
+        assert "768" in str(error)
+
+    def test_dimension_mismatch_error(self):
+        """Test DimensionMismatchError exception."""
+        error = DimensionMismatchError(query_dims=256, expected_dims=768)
+        assert error.query_dims == 256
+        assert error.expected_dims == 768
+        assert "256" in str(error)
+        assert "768" in str(error)
+        assert "Re-index" in str(error)
+
+    def test_model_metadata_persists_across_sessions(self, temp_db_dir):
+        """Test that model metadata persists across database sessions."""
+        # Session 1: Initialize and set model
+        initializer1 = DatabaseInitializer(temp_db_dir)
+        initializer1.initialize()
+        initializer1.set_embedding_model(
+            model_name="unixcoder",
+            model_path="microsoft/unixcoder-base",
+            dimensions=768,
+            entity_count=1000,
+        )
+
+        # Session 2: Create new initializer instance
+        initializer2 = DatabaseInitializer(temp_db_dir)
+
+        model_info = initializer2.get_embedding_model()
+        assert model_info is not None
+        assert model_info.name == "unixcoder"
+        assert model_info.dimensions == 768
+        assert model_info.entity_count == 1000
+
+    def test_embedding_dimensions_synced_with_model(self, temp_db_dir):
+        """Test that embedding_dimensions config is synced with model info."""
+        initializer = DatabaseInitializer(temp_db_dir)
+        initializer.initialize()
+
+        # Set model with specific dimensions
+        initializer.set_embedding_model(
+            model_name="codet5p-110m",
+            model_path="Salesforce/codet5p-110m-embedding",
+            dimensions=256,
+            entity_count=100,
+        )
+
+        # Top-level embedding_dimensions should match
+        assert initializer.get_embedding_dimensions() == 256
+
+        # Read config file directly
+        with open(initializer.config_file) as f:
+            config = json.load(f)
+
+        assert config["embedding_dimensions"] == 256
+        assert config["embedding_model"]["dimensions"] == 256

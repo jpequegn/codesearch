@@ -12,7 +12,12 @@ from codesearch.lancedb.models import (
 )
 from codesearch.lancedb.client import LanceDBClient
 from codesearch.lancedb.pool import DatabaseConnectionPool
-from codesearch.lancedb.initialization import DatabaseInitializer
+from codesearch.lancedb.initialization import (
+    DatabaseInitializer,
+    DimensionMismatchError,
+    EmbeddingModelInfo,
+    ModelMismatchError,
+)
 from codesearch.lancedb.backup import DatabaseBackupManager
 from codesearch.lancedb.statistics import DatabaseStatistics
 from codesearch.lancedb.optimization import DatabaseOptimizer
@@ -35,4 +40,8 @@ __all__ = [
     "DatabaseBackupManager",
     "DatabaseStatistics",
     "DatabaseOptimizer",
+    # Errors
+    "DimensionMismatchError",
+    "EmbeddingModelInfo",
+    "ModelMismatchError",
 ]

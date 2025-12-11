@@ -36,25 +36,65 @@ def pattern(
     limit: int = typer.Option(10, "--limit", "-l", help="Maximum results to return"),
     output: str = typer.Option("table", "--output", "-o", help="Output format (table or json)"),
     language: Optional[str] = typer.Option(None, "--language", "-L", help="Filter by language"),
+    model: Optional[str] = typer.Option(
+        None,
+        "--model",
+        "-m",
+        help="Embedding model to use for query (should match indexed model)",
+    ),
 ) -> None:
     """Search for code matching a semantic description.
 
     Uses semantic search to find code entities matching your description.
 
     Example:
-        $ codesearch pattern "error handling" --limit 5
-        $ codesearch pattern "authenticate user" --language python
+        $ codesearch search "error handling" --limit 5
+        $ codesearch search "authenticate user" --language python
+        $ codesearch search "function definition" --model unixcoder
     """
     try:
         db_path = get_db_path()
+        db_path_obj = Path(db_path)
 
         if not validate_db_exists(db_path):
             typer.echo(f"❌ Database not found at {db_path}", err=True)
             typer.echo("Run 'codesearch index <path>' to create a database", err=True)
             raise typer.Exit(2)
 
+        # Check model compatibility before searching
+        db_initializer = DatabaseInitializer(db_path_obj)
+        indexed_model = db_initializer.get_embedding_model()
+
+        # Create embedder with specified or default model
+        if model:
+            from codesearch.embeddings.config import get_model_config
+            try:
+                model_config = get_model_config(model)
+            except ValueError as e:
+                typer.echo(f"❌ {e}", err=True)
+                raise typer.Exit(1) from None
+
+            # Check compatibility
+            if indexed_model:
+                is_compatible, warning = db_initializer.check_model_compatibility(
+                    model, model_config.dimensions
+                )
+                if warning:
+                    typer.echo(warning)
+                if not is_compatible:
+                    raise typer.Exit(1)
+
+            embedder = EmbeddingGenerator(model_config=model)
+        else:
+            # Use indexed model if available, otherwise default
+            if indexed_model:
+                embedder = EmbeddingGenerator(model_config=indexed_model.name)
+                typer.echo(f"ℹ️  Using indexed model: {indexed_model.name}")
+            else:
+                embedder = EmbeddingGenerator()
+
         client = lancedb.connect(db_path)
-        engine = QueryEngine(client)
+        engine = QueryEngine(client, embedder=embedder)
 
         typer.echo(f"🔍 Searching for: {query}")
         results = engine.search_text(query, limit=limit)
@@ -420,9 +460,27 @@ def index(
         # Check if already indexed (before initializing, which creates files)
         db_initializer = DatabaseInitializer(db_path_obj)
         if db_initializer.is_initialized() and not force:
+            # Check for model mismatch if user specified a different model
+            indexed_model = db_initializer.get_embedding_model()
+            if indexed_model and model and indexed_model.name != model:
+                typer.echo(f"⚠️  Database already indexed with model: {indexed_model.name}")
+                typer.echo(f"   Requested model: {model}")
+                typer.echo("")
+                typer.echo("   Options:")
+                typer.echo(f"   1. Re-index with --force: codesearch index {path} --force --model {model}")
+                typer.echo(f"   2. Use existing model: codesearch index {path} --model {indexed_model.name}")
+                raise typer.Exit(1)
+
             typer.echo(f"⚠️  Database already exists at {db_path}")
             typer.echo("Use --force to re-index")
             raise typer.Exit(1)
+
+        # Clear database if force re-indexing
+        if force and db_initializer.is_initialized():
+            typer.echo("🗑️  Clearing existing database for re-index...")
+            if not db_initializer.clear_for_reindex():
+                typer.echo("❌ Failed to clear database", err=True)
+                raise typer.Exit(1)
 
         # Backup existing if requested
         if backup and db_path_obj.exists() and list(db_path_obj.glob("*")):
@@ -607,6 +665,14 @@ def index(
                 typer.echo(f"   ⏭️  Skipped {result.skipped_count} duplicates")
             if result.failed_count > 0:
                 typer.echo(f"   ⚠️  {result.failed_count} storage errors")
+
+            # Store embedding model metadata for migration tracking
+            db_initializer.set_embedding_model(
+                model_name=model_info["name"],
+                model_path=model_info["model_path"],
+                dimensions=model_info["dimensions"],
+                entity_count=result.inserted_count,
+            )
         except Exception as e:
             typer.echo(f"❌ Database storage error: {e}", err=True)
             raise typer.Exit(1) from None
@@ -993,6 +1059,128 @@ def search_multi(
                 typer.echo(json.dumps([r.__dict__ for r in repo_results], indent=2))
             else:
                 typer.echo(format_results_table(repo_results))
+
+    except typer.Exit:
+        raise
+    except Exception as e:
+        typer.echo(f"❌ Error: {str(e)}", err=True)
+        raise typer.Exit(1)
+
+
+def reindex(
+    path: str = typer.Argument(".", help="Path to codebase or file to re-index"),
+    model: Optional[str] = typer.Option(
+        None,
+        "--model",
+        "-m",
+        help=f"New embedding model ({', '.join(get_available_models())})",
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+) -> None:
+    """Re-index with a different embedding model.
+
+    Clears the existing database and re-indexes with the specified model.
+    Useful when switching to a different embedding model.
+
+    Example:
+        $ codesearch reindex --model unixcoder
+        $ codesearch reindex /path/to/repo --model codet5p-110m --yes
+    """
+    try:
+        db_path = get_db_path()
+        db_path_obj = Path(db_path)
+        path_obj = Path(path).resolve()
+
+        if not path_obj.exists():
+            typer.echo(f"❌ Path not found: {path}", err=True)
+            raise typer.Exit(2)
+
+        # Check current model
+        db_initializer = DatabaseInitializer(db_path_obj)
+        indexed_model = db_initializer.get_embedding_model()
+
+        # Determine target model
+        target_model = model
+        if not target_model:
+            from codesearch.embeddings.config import DEFAULT_MODEL_NAME
+            target_model = DEFAULT_MODEL_NAME
+
+        # Show info and confirm
+        typer.echo("📊 Re-index Information:")
+        typer.echo(f"   Path: {path_obj}")
+        if indexed_model:
+            typer.echo(f"   Current model: {indexed_model.name} ({indexed_model.dimensions}d)")
+            typer.echo(f"   Current entities: {indexed_model.entity_count}")
+        else:
+            typer.echo("   Current model: none (not indexed)")
+        typer.echo(f"   Target model: {target_model}")
+        typer.echo("")
+
+        if not yes:
+            confirm = typer.confirm(
+                f"Re-index {path_obj.name} with {target_model}? This will clear existing data."
+            )
+            if not confirm:
+                typer.echo("Cancelled.")
+                raise typer.Exit(0)
+
+        # Clear and re-index
+        if db_initializer.is_initialized():
+            typer.echo("🗑️  Clearing existing database...")
+            if not db_initializer.clear_for_reindex():
+                typer.echo("❌ Failed to clear database", err=True)
+                raise typer.Exit(1)
+
+        # Delegate to index command with force flag
+        typer.echo(f"\n🔄 Re-indexing with {target_model}...\n")
+        index(path=path, force=True, model=target_model, backup=False)
+
+    except typer.Exit:
+        raise
+    except Exception as e:
+        typer.echo(f"❌ Error: {str(e)}", err=True)
+        raise typer.Exit(1)
+
+
+def model_info() -> None:
+    """Show information about the indexed embedding model.
+
+    Displays the embedding model used for the current database,
+    including dimensions and entity count.
+
+    Example:
+        $ codesearch model-info
+    """
+    try:
+        db_path = get_db_path()
+        db_path_obj = Path(db_path)
+
+        if not validate_db_exists(db_path):
+            typer.echo(f"❌ Database not found at {db_path}", err=True)
+            typer.echo("Run 'codesearch index <path>' to create a database", err=True)
+            raise typer.Exit(2)
+
+        db_initializer = DatabaseInitializer(db_path_obj)
+        indexed_model = db_initializer.get_embedding_model()
+
+        if not indexed_model:
+            typer.echo("ℹ️  No embedding model metadata found.")
+            typer.echo("   This database may have been created with an older version.")
+            typer.echo("   Re-index to store model metadata.")
+            raise typer.Exit(0)
+
+        typer.echo("📊 Indexed Embedding Model:")
+        typer.echo(f"   Name: {indexed_model.name}")
+        typer.echo(f"   Model Path: {indexed_model.model_path}")
+        typer.echo(f"   Dimensions: {indexed_model.dimensions}")
+        typer.echo(f"   Entity Count: {indexed_model.entity_count}")
+        typer.echo(f"   Indexed At: {indexed_model.indexed_at}")
+
+        # Show available models
+        typer.echo("\n📋 Available Models:")
+        for m in get_available_models():
+            marker = " (current)" if m == indexed_model.name else ""
+            typer.echo(f"   • {m}{marker}")
 
     except typer.Exit:
         raise
