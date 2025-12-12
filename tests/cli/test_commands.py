@@ -1434,3 +1434,142 @@ def test_index_command_stores_relationships(tmp_path):
                                     # The relationship should be caller_func -> callee_func
                                     rel = captured_relationships[0]
                                     assert rel.relationship_type == "calls"
+
+
+# =============================================================================
+# MLX Model CLI Support Tests
+# =============================================================================
+
+
+class TestListModelsCommand:
+    """Tests for the list-models command."""
+
+    def test_list_models_shows_all_models(self) -> None:
+        """Test that list-models shows all available models."""
+        result = runner.invoke(app, ["list-models"])
+        assert result.exit_code == 0
+        # Check header
+        assert "Available Embedding Models" in result.stdout
+        # Check some model names are present
+        assert "codebert" in result.stdout
+        assert "unixcoder" in result.stdout
+
+    def test_list_models_shows_mlx_models(self) -> None:
+        """Test that list-models shows MLX models."""
+        result = runner.invoke(app, ["list-models"])
+        assert result.exit_code == 0
+        # MLX models should be listed
+        assert "nomic-mlx" in result.stdout
+        assert "bge-m3-mlx" in result.stdout
+        assert "bge-large-mlx" in result.stdout
+        assert "bge-small-mlx" in result.stdout
+
+    def test_list_models_shows_backend_column(self) -> None:
+        """Test that list-models shows backend type column."""
+        result = runner.invoke(app, ["list-models"])
+        assert result.exit_code == 0
+        # Backend types should be visible
+        assert "PyTorch" in result.stdout or "MLX" in result.stdout or "API" in result.stdout
+
+    def test_list_models_shows_mlx_backend(self) -> None:
+        """Test that list-models shows MLX as backend for MLX models."""
+        result = runner.invoke(app, ["list-models"])
+        assert result.exit_code == 0
+        # MLX backend should appear
+        assert "MLX" in result.stdout
+        assert "Apple Silicon" in result.stdout  # Notes for MLX models
+
+
+class TestMLXAvailabilityCheck:
+    """Tests for _check_mlx_availability helper."""
+
+    def test_non_mlx_model_returns_true(self) -> None:
+        """Test that non-MLX models always return True."""
+        from rich.console import Console
+
+        from codesearch.cli.commands import _check_mlx_availability
+
+        console = Console(force_terminal=True)
+        # Non-MLX model should return True
+        assert _check_mlx_availability("codebert", console) is True
+        assert _check_mlx_availability("unixcoder", console) is True
+        assert _check_mlx_availability("voyage-code-3", console) is True
+
+    def test_mlx_model_on_apple_silicon(self) -> None:
+        """Test MLX availability check on Apple Silicon."""
+        from rich.console import Console
+
+        from codesearch.cli.commands import _check_mlx_availability
+
+        console = Console(force_terminal=True)
+
+        with (
+            patch("platform.system", return_value="Darwin"),
+            patch("platform.machine", return_value="arm64"),
+        ):
+            # Should return True on Apple Silicon
+            assert _check_mlx_availability("nomic-mlx", console) is True
+
+    def test_mlx_model_on_non_apple_silicon(self) -> None:
+        """Test MLX availability check on non-Apple Silicon."""
+        from io import StringIO
+
+        from rich.console import Console
+
+        from codesearch.cli.commands import _check_mlx_availability
+
+        output = StringIO()
+        console = Console(file=output, force_terminal=True)
+
+        with (
+            patch("platform.system", return_value="Linux"),
+            patch("platform.machine", return_value="x86_64"),
+        ):
+            # Should return False and print warning
+            result = _check_mlx_availability("nomic-mlx", console)
+            assert result is False
+
+    def test_mlx_model_on_intel_mac(self) -> None:
+        """Test MLX availability check on Intel Mac."""
+        from io import StringIO
+
+        from rich.console import Console
+
+        from codesearch.cli.commands import _check_mlx_availability
+
+        output = StringIO()
+        console = Console(file=output, force_terminal=True)
+
+        with (
+            patch("platform.system", return_value="Darwin"),
+            patch("platform.machine", return_value="x86_64"),
+        ):
+            # Should return False on Intel Mac
+            result = _check_mlx_availability("bge-m3-mlx", console)
+            assert result is False
+
+
+class TestBenchmarkModelsSkipMLX:
+    """Tests for benchmark-models --skip-mlx option."""
+
+    def test_benchmark_models_skip_mlx_filters_models(self) -> None:
+        """Test that --skip-mlx removes MLX models from benchmark."""
+        from codesearch.benchmarks.runner import BenchmarkRunner
+
+        # Without skip_mlx, MLX models should be included
+        runner_with_mlx = BenchmarkRunner(skip_api_models=True, skip_mlx_models=False)
+        mlx_models_present = any("mlx" in m for m in runner_with_mlx.models)
+        assert mlx_models_present, "MLX models should be present without --skip-mlx"
+
+        # With skip_mlx, MLX models should be excluded
+        runner_without_mlx = BenchmarkRunner(skip_api_models=True, skip_mlx_models=True)
+        mlx_models_absent = all("mlx" not in m for m in runner_without_mlx.models)
+        assert mlx_models_absent, "MLX models should be absent with --skip-mlx"
+
+    def test_benchmark_models_cli_skip_mlx_option(self) -> None:
+        """Test that --skip-mlx CLI option is recognized."""
+        # Just verify the option is accepted (don't run full benchmark)
+        result = runner.invoke(app, ["benchmark-models", "--help"])
+        assert result.exit_code == 0
+        assert "--skip-mlx" in result.stdout
+        assert "Skip MLX models" in result.stdout
