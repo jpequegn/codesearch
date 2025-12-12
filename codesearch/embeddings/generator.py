@@ -7,6 +7,7 @@ from codesearch.embeddings.config import (
     PoolingStrategy,
     get_embedding_config,
     get_model_config,
+    is_mlx_model,
 )
 from codesearch.models import EmbeddingModel
 
@@ -21,7 +22,8 @@ class EmbeddingGenerator:
     - Default (UniXcoder)
 
     For API-based models (e.g., voyage-code-3), delegates to the appropriate
-    API client. For local models, uses HuggingFace transformers.
+    API client. For MLX models on Apple Silicon, delegates to MLXEmbeddingGenerator.
+    For local models, uses HuggingFace transformers.
     """
 
     def __init__(
@@ -37,16 +39,22 @@ class EmbeddingGenerator:
                 - EmbeddingModel: Legacy config object (for backwards compatibility)
                 - str: Model name (e.g., "codebert", "unixcoder", "voyage-code-3")
                 - None: Use environment/config file/defaults
-            device: Override device setting ("cpu", "cuda", "mps", "auto", "api")
+            device: Override device setting ("cpu", "cuda", "mps", "auto", "api", "mlx")
         """
         # Resolve configuration from all sources
         self.config = self._resolve_config(model_config, device)
 
-        # Check if this is an API-based model
+        # Initialize generator attributes
         self._api_generator = None
+        self._mlx_generator = None
+
+        # Route to appropriate backend based on model/device
         if self.config.device == "api" or self.config.model_name == "voyage-code-3":
             self._init_api_generator()
             self.device = "api"
+        elif self.config.device == "mlx" or is_mlx_model(self.config.model_name):
+            self._init_mlx_generator()
+            self.device = "mlx"
         else:
             self._init_local_model()
 
@@ -65,6 +73,15 @@ class EmbeddingGenerator:
                 f"Unknown API model: {self.config.model_name}. "
                 f"Supported API models: voyage-code-3"
             )
+
+    def _init_mlx_generator(self) -> None:
+        """Initialize MLX-based embedding generator for Apple Silicon."""
+        from codesearch.embeddings.mlx import MLXEmbeddingGenerator
+
+        self._mlx_generator = MLXEmbeddingGenerator(
+            model_name=self.config.model_name,
+            dimensions=self.config.dimensions,
+        )
 
     def _init_local_model(self) -> None:
         """Initialize local HuggingFace model."""
@@ -178,6 +195,10 @@ class EmbeddingGenerator:
         if self._api_generator is not None:
             return self._api_generator.get_model_info()
 
+        # Delegate to MLX generator if available
+        if self._mlx_generator is not None:
+            return self._mlx_generator.get_model_info()
+
         return {
             "name": self.config.model_name,
             "model_path": self.config.model_path,
@@ -228,6 +249,10 @@ class EmbeddingGenerator:
         if self._api_generator is not None:
             return self._api_generator.embed_code(code_text)
 
+        # Delegate to MLX generator if using MLX model
+        if self._mlx_generator is not None:
+            return self._mlx_generator.embed_code(code_text)
+
         # Tokenize input
         inputs = self.tokenizer(
             code_text,
@@ -262,6 +287,10 @@ class EmbeddingGenerator:
         # Delegate to API generator if using API-based model
         if self._api_generator is not None:
             return self._api_generator.embed_batch(code_texts)
+
+        # Delegate to MLX generator if using MLX model
+        if self._mlx_generator is not None:
+            return self._mlx_generator.embed_batch(code_texts)
 
         # Tokenize all inputs at once
         inputs = self.tokenizer(
