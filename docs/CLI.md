@@ -305,18 +305,37 @@ codesearch index <path> [OPTIONS]
 --language LANG        Index specific language (python, typescript, go, or all)
 --incremental         Only index changed files (default: true)
 --full-reindex        Force complete re-indexing
---model MODEL         Embedding model to use
+--model MODEL         Embedding model to use (see Model Options below)
+--device DEVICE       Compute device: auto, cpu, cuda, mps, mlx, api
 --batch-size N        Batch size for embedding (default: 32)
 --exclude PATTERN     Exclude file patterns (e.g., *.test.py)
 --workers N           Number of parallel workers (default: CPU count)
 --repo-id ID          Repository identifier for multi-repo support
 ```
 
+### Model Options
+
+| Model | Device | Dims | Best For |
+|-------|--------|------|----------|
+| `unixcoder` | auto | 768 | Default, good quality |
+| `codebert` | auto | 768 | Well-tested baseline |
+| `nomic-mlx` | mlx | 768 | Apple Silicon, fast |
+| `bge-small-mlx` | mlx | 384 | Apple Silicon, fastest |
+| `bge-m3-mlx` | mlx | 1024 | Apple Silicon, best quality |
+| `voyage-code-3` | api | 1024 | API, highest quality |
+
+See [MLX Documentation](MLX.md) for Apple Silicon optimization.
+
 ### Examples
 
 **Simple indexing:**
 ```bash
 codesearch index ~/my-project
+```
+
+**Index with MLX on Apple Silicon (10-15x faster):**
+```bash
+codesearch index ~/my-project --model nomic-mlx
 ```
 
 **Index only Python files:**

@@ -317,7 +317,23 @@ brew install codesearch
 pip install codesearch
 ```
 
-**Apple Silicon (M1/M2/M3):**
+**Apple Silicon (M1/M2/M3/M4) with MLX (Recommended):**
+```bash
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# Install codesearch with MLX support
+pip install codesearch mlx-embedding-models
+
+# Verify MLX is working
+python -c "from codesearch.embeddings.mlx import is_apple_silicon; print(f'MLX available: {is_apple_silicon()}')"
+
+# Use MLX for 10-15x faster embeddings
+codesearch index ~/my-project --model nomic-mlx
+```
+
+**Apple Silicon with PyTorch (Alternative):**
 ```bash
 # Use conda for better compatibility
 conda create -n codesearch python=3.11
@@ -325,6 +341,8 @@ conda activate codesearch
 conda install pytorch::pytorch -c pytorch
 pip install codesearch
 ```
+
+For more details on MLX support, see [MLX Documentation](MLX.md).
 
 ### Linux
 
