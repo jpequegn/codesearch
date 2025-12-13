@@ -1,16 +1,16 @@
 """Benchmark runner that orchestrates quality and performance tests."""
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from rich.console import Console
 from rich.table import Table
 
-from codesearch.benchmarks.performance import PerformanceMetrics, PerformanceBenchmark
-from codesearch.benchmarks.quality import QualityMetrics, QualityBenchmark
-from codesearch.embeddings.config import get_available_models, get_model_config
+from codesearch.benchmarks.performance import PerformanceBenchmark, PerformanceMetrics
+from codesearch.benchmarks.quality import QualityBenchmark, QualityMetrics
+from codesearch.embeddings.config import get_available_models, get_model_config, is_mlx_model
 
 
 @dataclass
@@ -38,6 +38,7 @@ class BenchmarkRunner:
         models: Optional[List[str]] = None,
         samples: Optional[List[str]] = None,
         skip_api_models: bool = False,
+        skip_mlx_models: bool = False,
     ):
         """Initialize benchmark runner.
 
@@ -45,19 +46,34 @@ class BenchmarkRunner:
             models: List of model names to benchmark (defaults to all)
             samples: Custom code samples for benchmarking
             skip_api_models: Skip API-based models (e.g., voyage-code-3)
+            skip_mlx_models: Skip MLX models (e.g., nomic-mlx, bge-*-mlx)
         """
-        self.models = models or self._get_local_models(skip_api_models)
+        self.models = models or self._get_filtered_models(skip_api_models, skip_mlx_models)
         self.samples = samples
         self.quality_benchmark = QualityBenchmark()
         self.performance_benchmark = PerformanceBenchmark(samples=samples)
         self.results: Dict[str, BenchmarkResult] = {}
 
-    def _get_local_models(self, skip_api: bool) -> List[str]:
-        """Get list of models to benchmark."""
+    def _get_filtered_models(self, skip_api: bool, skip_mlx: bool) -> List[str]:
+        """Get list of models to benchmark with filters applied.
+
+        Args:
+            skip_api: Skip API-based models
+            skip_mlx: Skip MLX-based models
+
+        Returns:
+            Filtered list of model names
+        """
         all_models = get_available_models()
+        filtered = all_models
+
         if skip_api:
-            return [m for m in all_models if get_model_config(m).device != "api"]
-        return all_models
+            filtered = [m for m in filtered if get_model_config(m).device != "api"]
+
+        if skip_mlx:
+            filtered = [m for m in filtered if not is_mlx_model(m)]
+
+        return filtered
 
     def run(
         self,

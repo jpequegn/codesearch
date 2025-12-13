@@ -4,15 +4,33 @@ This module provides the main CLI interface using Typer framework.
 Supports semantic code search, analysis, and indexing operations.
 """
 
-import typer
 from typing import Annotated, Optional
+
+import typer
+
 from codesearch import __version__
 from codesearch.cli.commands import (
-    pattern, find_similar, dependencies, index, refactor_dupes, list_functions,
-    repo_list, repo_add, repo_remove, search_multi, benchmark_models, reindex, model_info
+    benchmark_models,
+    dependencies,
+    find_similar,
+    index,
+    list_functions,
+    list_models,
+    model_info,
+    pattern,
+    refactor_dupes,
+    reindex,
+    repo_add,
+    repo_list,
+    repo_remove,
+    search_multi,
 )
 from codesearch.cli.interactive import (
-    detail, context, compare, config_show, config_init
+    compare,
+    config_init,
+    config_show,
+    context,
+    detail,
 )
 
 
@@ -75,6 +93,7 @@ app.command(name="benchmark-models")(benchmark_models)
 # Register model migration commands
 app.command(name="reindex")(reindex)
 app.command(name="model-info")(model_info)
+app.command(name="list-models")(list_models)
 
 
 def run() -> None:

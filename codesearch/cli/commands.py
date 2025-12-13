@@ -16,7 +16,7 @@ from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn
 from codesearch.cli.config import get_db_path, validate_db_exists
 from codesearch.cli.formatting import format_results_json, format_results_table
 from codesearch.data_ingestion.pipeline import DataIngestionPipeline
-from codesearch.embeddings.config import get_available_models
+from codesearch.embeddings.config import get_available_models, get_model_config, is_mlx_model
 from codesearch.embeddings.generator import EmbeddingGenerator
 from codesearch.indexing.incremental import IncrementalIndexer
 from codesearch.indexing.repository import RepositoryRegistry
@@ -1189,6 +1189,79 @@ def model_info() -> None:
         raise typer.Exit(1)
 
 
+def list_models() -> None:
+    """List all available embedding models with their details.
+
+    Shows backend type (PyTorch, MLX, API), dimensions, and requirements.
+
+    Example:
+        $ codesearch list-models
+    """
+    from rich.table import Table
+
+    console = Console()
+
+    table = Table(title="Available Embedding Models")
+    table.add_column("Model", style="cyan")
+    table.add_column("Backend", style="green")
+    table.add_column("Dims", justify="right")
+    table.add_column("Max Length", justify="right")
+    table.add_column("Notes")
+
+    for model_name in get_available_models():
+        config = get_model_config(model_name)
+
+        # Determine backend
+        if config.device == "api":
+            backend = "API"
+            notes = "Requires API key"
+        elif config.device == "mlx":
+            backend = "MLX"
+            notes = "Apple Silicon only"
+        else:
+            backend = "PyTorch"
+            notes = "CPU/CUDA/MPS"
+
+        table.add_row(
+            model_name,
+            backend,
+            str(config.dimensions),
+            str(config.max_length),
+            notes,
+        )
+
+    console.print(table)
+    console.print("\n[dim]Use --model <name> with index/search commands[/dim]")
+
+
+def _check_mlx_availability(model_name: str, console: Console) -> bool:
+    """Check if MLX is available when MLX model is selected.
+
+    Args:
+        model_name: Name of the model to check
+        console: Rich console for output
+
+    Returns:
+        True if MLX is available or model doesn't need MLX, False otherwise
+    """
+    if not is_mlx_model(model_name):
+        return True
+
+    import platform
+
+    if platform.system() != "Darwin" or platform.machine() != "arm64":
+        console.print(
+            "[yellow]⚠️  Warning: MLX models require Apple Silicon (M1/M2/M3/M4).[/yellow]"
+        )
+        console.print(
+            f"[yellow]   Current platform: {platform.system()} {platform.machine()}[/yellow]"
+        )
+        console.print("[yellow]   Consider using a PyTorch model instead.[/yellow]")
+        return False
+
+    return True
+
+
 def benchmark_models(
     models: Optional[str] = typer.Option(
         None,
@@ -1222,6 +1295,11 @@ def benchmark_models(
         False,
         "--include-api",
         help="Include API-based models (requires API keys)",
+    ),
+    skip_mlx: bool = typer.Option(
+        False,
+        "--skip-mlx",
+        help="Skip MLX models (nomic-mlx, bge-*-mlx)",
     ),
     save_path: Optional[Path] = typer.Option(
         None,
@@ -1284,6 +1362,7 @@ def benchmark_models(
             models=model_list,
             samples=custom_samples,
             skip_api_models=not include_api,
+            skip_mlx_models=skip_mlx,
         )
 
         # Show models being benchmarked
